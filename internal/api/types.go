@@ -1133,6 +1133,29 @@ type DeleteAdminSkillResponse struct {
 	UsedByAgents []string `json:"usedByAgents,omitempty"`
 }
 
+type AdminSkillPackageSkill struct {
+	ID      string `json:"id"`
+	Version string `json:"version,omitempty"`
+}
+
+type AdminSkillPackageResponse struct {
+	ID          string                   `json:"id"`
+	Version     string                   `json:"version"`
+	SHA256      string                   `json:"sha256"`
+	Skills      []AdminSkillPackageSkill `json:"skills"`
+	InstalledAt int64                    `json:"installedAt"`
+}
+
+type DeleteAdminSkillPackageRequest struct {
+	Key string `json:"key"`
+}
+
+type DeleteAdminSkillPackageResponse struct {
+	Key     string                   `json:"key"`
+	Deleted bool                     `json:"deleted"`
+	Skills  []AdminSkillPackageSkill `json:"skills"`
+}
+
 type WriteAdminSkillFileRequest struct {
 	Key        string `json:"key"`
 	Path       string `json:"path"`
