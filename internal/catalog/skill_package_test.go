@@ -44,7 +44,7 @@ func TestEditableSkillPackageInstallUpdateDeleteAndRollback(t *testing.T) {
 		}
 	}
 	recordPath := filepath.Join(root, "office-pack", "package.json")
-	assertSkillPackageRecord(t, recordPath, "office-pack", "1.0.0", []string{"excel-helper", "word-helper"})
+	assertSkillPackageRecord(t, recordPath, "office-pack", "1.0.0", []string{"word-helper", "excel-helper"})
 	packages, err := registry.EditableSkillPackages()
 	if err != nil || len(packages) != 1 || packages[0].ID != "office-pack" {
 		t.Fatalf("unexpected package list: %#v err=%v", packages, err)
@@ -62,7 +62,7 @@ func TestEditableSkillPackageInstallUpdateDeleteAndRollback(t *testing.T) {
 	if err := updateMutation.Rollback(); err != nil {
 		t.Fatalf("rollback package update: %v", err)
 	}
-	assertSkillPackageRecord(t, recordPath, "office-pack", "1.0.0", []string{"excel-helper", "word-helper"})
+	assertSkillPackageRecord(t, recordPath, "office-pack", "1.0.0", []string{"word-helper", "excel-helper"})
 	if _, err := os.Stat(filepath.Join(root, "office-pack", "excel-helper", "SKILL.md")); err != nil {
 		t.Fatalf("rollback did not restore old child: %v", err)
 	}

@@ -91,7 +91,7 @@ func (s *Server) listAgentSkillPackages() ([]api.AgentSkillPackageResponse, erro
 				p.MissingSkillIDs = append(p.MissingSkillIDs, skill.ID)
 				continue
 			}
-			p.Skills = append(p.Skills, api.AdminSkillPackageSkill{ID: skill.ID, Version: skill.Version})
+			p.Skills = append(p.Skills, api.AdminSkillPackageSkill{Key: skill.ID, ID: skill.ID, Version: skill.Version})
 		}
 		result = append(result, p)
 	}

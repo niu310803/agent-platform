@@ -90,7 +90,7 @@ func TestAgentSkillPackagePinsRejectMissingOrInvalidPackagesAndAllowCleanup(t *t
 		{name: "deleted directory", remove: true},
 		{name: "invalid JSON", manifest: `{`},
 		{name: "missing name", manifest: `{}`},
-		{name: "mismatched name", manifest: `{"name":"another-package"}`},
+		{name: "mismatched name", manifest: `{"name":"another-package","skills":[]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newAgentSkillsTestFixture(t, false)

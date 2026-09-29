@@ -15,7 +15,7 @@ import (
 func nestedSkillFixture(t *testing.T) (*FileRegistry, string) {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "skills-center")
-	writeRuntimeAssemblerFile(t, filepath.Join(root, "suite", "package.json"), `{"name":"suite"}`)
+	writeRuntimeAssemblerFile(t, filepath.Join(root, "suite", "package.json"), `{"name":"suite","skills":[{"key":"demo"},{"key":"other"}]}`)
 	for key, body := range map[string]string{"demo": "Standalone", "suite/demo": "Packaged", "suite/other": "Other"} {
 		writeRuntimeAssemblerFile(t, filepath.Join(root, filepath.FromSlash(key), "SKILL.md"), "---\nname: "+filepath.Base(key)+"\ndescription: "+body+"\nversion: 1.0.0\n---\n"+body+"\n")
 	}
@@ -192,5 +192,93 @@ func TestRegistryStartupMigratesLegacyPackagesBeforeLoadingSkills(t *testing.T) 
 	again, _ := filepath.Glob(filepath.Join(root, ".skill-package-backup-*"))
 	if len(again) != 1 {
 		t.Fatalf("migration repeated: %v", again)
+	}
+}
+
+func TestDeclaredPackageMembersAreTheOnlyResolvableChildren(t *testing.T) {
+	r, center := nestedSkillFixture(t)
+	writeRuntimeAssemblerSkill(t, filepath.Join(center, "suite", "undeclared"), "Not declared")
+	keys, err := skillDirectoryKeys(center)
+	if err != nil || !reflect.DeepEqual(keys, []string{"demo", "suite/demo", "suite/other"}) {
+		t.Fatalf("declaration keys=%v err=%v", keys, err)
+	}
+	if _, ok, err := ResolveSkillDefinition("", center, "suite/undeclared"); err != nil || ok {
+		t.Fatalf("undeclared child resolved: ok=%v err=%v", ok, err)
+	}
+	if _, err := r.ReadEditableSkillFile("suite/undeclared", "SKILL.md"); !errors.Is(err, ErrInvalidSkillPath) {
+		t.Fatalf("undeclared child editable: %v", err)
+	}
+	if _, err := r.CreateEditableSkill("suite/new", "---\nname: new\ndescription: New\n---\nNew", nil); !errors.Is(err, ErrInvalidSkillPath) {
+		t.Fatalf("undeclared child created: %v", err)
+	}
+	archive := buildSkillImportZIP(t, []skillImportZIPEntry{{name: "SKILL.md", content: []byte("---\nname: undeclared\ndescription: Not declared\n---\nbody")}})
+	if _, _, err := r.BeginImportEditableSkillArchive("suite/undeclared", bytes.NewReader(archive), int64(len(archive)), true); !errors.Is(err, ErrInvalidSkillPath) {
+		t.Fatalf("undeclared child imported: %v", err)
+	}
+	root := filepath.Dir(center)
+	agents := filepath.Join(root, "agents")
+	writeRuntimeAssemblerAgent(t, agents, "writer", []string{"suite/undeclared"})
+	assembler, err := newRuntimeAgentAssembler(filepath.Join(root, "ru-agents"), center)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, admin, err := loadAgentsWithAdminAssembler(agents, filepath.Join(root, "chats"), true, assembler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loaded["writer"]; ok {
+		t.Fatalf("runtime accepted undeclared child: %+v", admin)
+	}
+}
+
+func TestDeclaredMissingMemberRemainsInvalidAndCanBeCreated(t *testing.T) {
+	r, root := nestedSkillFixture(t)
+	if err := os.RemoveAll(filepath.Join(root, "suite", "other")); err != nil {
+		t.Fatal(err)
+	}
+	items, err := r.AdminSkills()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 || items[2].Key != "suite/other" || items[2].Status != AdminSkillStatusInvalid {
+		t.Fatalf("missing member disappeared: %+v", items)
+	}
+	item, ok, err := r.AdminSkill("suite/other")
+	if err != nil || !ok || item.Status != AdminSkillStatusInvalid {
+		t.Fatalf("missing member detail=%+v ok=%v err=%v", item, ok, err)
+	}
+	if _, err := r.CreateEditableSkill("suite/other", "---\nname: other\ndescription: Repaired\n---\nRepaired", nil); err != nil {
+		t.Fatal(err)
+	}
+	def, ok, err := ResolveSkillDefinition("", root, "suite/other")
+	if err != nil || !ok || def.Description != "Repaired" {
+		t.Fatalf("repaired=%+v ok=%v err=%v", def, ok, err)
+	}
+}
+
+func TestInvalidDeclaredMemberDoesNotHideHealthySiblings(t *testing.T) {
+	for _, kind := range []string{"symlink", "file"} {
+		t.Run(kind, func(t *testing.T) {
+			r, root := nestedSkillFixture(t)
+			broken := filepath.Join(root, "suite", "other")
+			if err := os.RemoveAll(broken); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "symlink" {
+				if err := os.Symlink(filepath.Join(root, "demo"), broken); err != nil {
+					t.Skip(err)
+				}
+			} else if err := os.WriteFile(broken, []byte("not a directory"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			defs, err := loadSkills(root, 0)
+			if err != nil || len(defs) != 2 || defs["suite/demo"].Description != "Packaged" {
+				t.Fatalf("catalog=%+v err=%v", defs, err)
+			}
+			items, err := r.AdminSkills()
+			if err != nil || len(items) != 3 || items[2].Status != AdminSkillStatusInvalid {
+				t.Fatalf("admin=%+v err=%v", items, err)
+			}
+		})
 	}
 }

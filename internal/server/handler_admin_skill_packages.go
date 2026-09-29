@@ -172,7 +172,7 @@ func rollbackSkillPackageMutation(ctx context.Context, s *Server, mutation *cata
 func adminSkillPackageResponse(record catalog.SkillPackageRecord) api.AdminSkillPackageResponse {
 	skills := make([]api.AdminSkillPackageSkill, 0, len(record.Skills))
 	for _, skill := range record.Skills {
-		skills = append(skills, api.AdminSkillPackageSkill{ID: skill.ID, Version: skill.Version, Diagnostics: adminSkillDiagnostics(skill.Diagnostics)})
+		skills = append(skills, api.AdminSkillPackageSkill{Key: skill.ID, ID: skill.ID, Version: skill.Version, Diagnostics: adminSkillDiagnostics(skill.Diagnostics)})
 	}
 	return api.AdminSkillPackageResponse{
 		Name: record.Name, Presentation: record.Presentation, Description: record.Description, Triggers: record.Triggers,

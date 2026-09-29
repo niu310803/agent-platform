@@ -11,7 +11,7 @@ Agent Platform 将可编辑事实源与执行目录分离：
 ├── ru-connectors/<id>/<digest>/     # 跨 Agent 共享的完整运行包
 ├── .state/                         # Platform 通用持久化运行状态
 │   └── connectors/<id>/            # 连接器授权与受管 CLI 状态
-├── skills-center/                  # 共享 Skill；.package/ 保存技能包控制状态
+├── skills-center/                  # 共享 Skill 与含 package.json 的技能包
 └── ru-agents/                      # Platform 生成，禁止人工编辑
     ├── .staging/
     └── <agentKey>/
@@ -28,7 +28,13 @@ Agent Platform 将可编辑事实源与执行目录分离：
 
 连接器通过 `connectorConfig.connectors` 挂载后，自动导入技能元数据；完整包按内容摘要共享安装到 `ru-connectors/<id>/<contentDigest>`，技能正文、资源、runtime env 和 hooks 读取该包的 skills，不再重复复制到同级 skills 目录。`skillId` 保留包内原始技能名，不加前缀；同一 Agent 下与已配置技能或其他连接器技能重名时返回冲突诊断。逻辑指令路径为 `@connectors/<id>/skills/<name>/SKILL.md`；`.config` 默认值仍按 Agent 独立合并。连接器 bin 从当前 Agent 的运行包加入 PATH，Container 只读挂载所选包。连接器技能不能作为 mustUseSkills，详见 [连接器](连接器.md)。
 
-技能包保存在 `skills-center/<package-id>/`，包根的 `package.json` 只描述包自身，只有 `name` 必填；不维护成员明细。Platform 只扫描包下一层带 `SKILL.md` 的目录，生成精确技能 key `<package-id>/<skill-id>`。顶层 `<skill-id>` 与包内同名技能可共存，安装、更新、编辑和卸载分别作用于精确 key；包更新只替换该包目录，不接管或覆盖顶层同名技能。普通技能内的 `sub-skills` 暂不扫描。技能包目录本身不可执行，也不能通过单技能接口覆盖；隐藏 staging 和 backup 不进入 Skill Catalog，临时 ZIP 不持久化。Platform 在首次启动 Catalog、开始监听目录前迁移旧 `.package` 记录：复制成员到新包目录，保留原顶层技能以兼容旧 Agent 短 key 引用，旧清单移入可恢复备份并记录路径。迁移完成后幂等；目标同名冲突保留原记录和已有目录，记录 skill_package_migration_conflict 并跳过该项，继续迁移其他包，不阻断服务启动。其他迁移错误仍保留备份并报告，不覆盖已有目录。普通查询和热重载不触发迁移。
+技能包保存在 `skills-center/<package-id>/`，包根的 `package.json` 必须包含合法 `name` 和 `skills` 数组，每项至少声明相对单段目录 key，例如 `{"key":"calendar"}`；key 非空且大小写不重复，`skills: []` 是有效空包。Platform 只读取声明成员的 `SKILL.md`，生成精确技能 key `<package-id>/<skill-id>`；包内未声明目录不参与目录加载、编辑准入或运行时组装。成员名称、描述和版本读取各自 `SKILL.md`。声明成员缺失时保留记录与 diagnostics，占位项不能执行，不使整个包消失。
+
+顶层 `<skill-id>` 与包内同名技能可共存，安装、更新、编辑和卸载分别作用于精确 key；包更新只替换该包目录，不接管或覆盖顶层同名技能。普通技能内的 `sub-skills` 暂不扫描。技能包目录本身不可执行，也不能通过单技能接口覆盖；隐藏 staging 和 backup 不进入 Skill Catalog，临时 ZIP 不持久化。
+
+Platform 在首次启动 Catalog、开始监听目录前迁移旧 `.package` 记录：复制成员到新包目录，保留原顶层技能以兼容旧 Agent 短 key 引用，旧清单移入可恢复备份并记录路径。迁移完成后幂等；目标同名冲突保留原记录和已有目录，记录 skill_package_migration_conflict 并跳过该项，继续迁移其他包，不阻断服务启动。其他迁移错误仍保留备份并报告，不覆盖已有目录。普通查询和热重载不触发迁移。
+
+对已安装且 `package.json` 缺少 `skills` 的历史包，启动阶段在加载技能前按历史直接子目录补齐显式声明一次，并在技能根外保留原清单字节备份；已有 `skills`（包括非法值）不会走此兼容路径。常规读取、编辑与新 ZIP 导入不自动推断或追加成员。
 
 `ru-agents` 不是来源追踪系统：不生成版本目录、Skill lock、provenance 或来源 API，也不进入 release bundle、环境资源打包产物或环境 overlay。服务启动或 Catalog 热重载时可从事实源完整重建。
 
@@ -46,7 +52,7 @@ Agent Platform 将可编辑事实源与执行目录分离：
 
 1. 单段 ID 对应的 `<agentsDir>/<agentKey>/skills/<id>` 存在时，必须是带合法 `SKILL.md` 的 Agent 自有 Skill。两段包成员 key 只从技能中心包目录读取，Agent 自有目录不遮蔽包成员。
 2. 本地目录存在但不合法时，Agent 无效，不回退技能中心。
-3. 本地不存在时，从 `<skills-center>/<id>` 读取。
+3. 本地不存在时，从 `<skills-center>/<id>` 读取；两段包成员 key 必须与包根 `package.json` 的成员声明匹配，不能仅凭目录存在准入。
 4. 两处都不存在或技能中心 Skill 非法时，Agent 无效。
 5. 重复 ID 保留第一次。
 
@@ -164,4 +170,4 @@ Catalog 按资源根建立独立 watcher；配置根重叠时合并后端，避�
 
 回滚只逆转已成功执行的备份和发布，不删除尚未移动的原目录。回滚失败时保留旧资源备份和原始包记录，不在启动时自动删除技能中心外的恢复目录；错误必须保留恢复位置供诊断。该保护覆盖 Platform 技能管理入口；连接器导入、编辑、删除复用同一保护，仍保留原有使用中与准备中拒绝规则。Desktop 应通过管理 API 发布或条件恢复，不直接移动正式目录；智能体应在 Workspace/临时目录准备资源后调用管理入口。Bash、外部编辑器及其他进程直接写盘不受此进程内锁约束，watcher 仅提供变化发现与最终同步，不承诺多文件写入的事务隔离。本次不增加 Host Bash 文件系统隔离。
 
-目录枚举统一忽略示例目录、隐藏目录和保留的旧连接器目录；单个技能包清单损坏或名称与目录不符时，记录 invalid_skill_package 并跳过该包，不阻断其他技能和技能包。具体包的读写/安装接口仍返回明确校验错误，不静默修复内容。
+目录枚举统一忽略示例目录、隐藏目录和保留的旧连接器目录；单个技能包清单损坏或名称与目录不符时，记录 invalid_skill_package 并跳过该包，不阻断其他技能和技能包。具体包的读写/安装接口仍返回明确校验错误，不静默修复内容。有效清单内的缺失成员保留 diagnostics，占位项不进入可执行目录。manifest 编辑可以先声明尚未创建的成员，再通过成员完整 key 创建或导入目录；移除声明保留文件，但受 Agent 使用保护。成员删除事务同步移除声明和目录，失败恢复二者，删除最后成员保留空包。

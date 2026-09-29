@@ -991,6 +991,7 @@ type DeleteAdminSkillResponse struct {
 }
 
 type AdminSkillPackageSkill struct {
+	Key         string                 `json:"key"`
 	Diagnostics []AdminAgentDiagnostic `json:"diagnostics,omitempty"`
 	ID          string                 `json:"id"`
 	Version     string                 `json:"version,omitempty"`

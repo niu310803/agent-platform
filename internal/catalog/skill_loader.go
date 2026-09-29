@@ -47,8 +47,18 @@ func loadSkills(root string, maxPromptChars int) (map[string]SkillDefinition, er
 		return nil, err
 	}
 	for _, key := range keys {
-		definition, ok, err := loadSkillDefinitionFromDir(filepath.Join(root, filepath.FromSlash(key)), key, maxPromptChars)
+		dir, err := editableSkillDir(root, key)
 		if err != nil {
+			log.Printf("[catalog][skills] skip unsafe skill %s: %v", key, err)
+			continue
+		}
+
+		definition, ok, err := loadSkillDefinitionFromDir(dir, key, maxPromptChars)
+		if err != nil {
+			if strings.Contains(key, "/") {
+				log.Printf("[catalog][skills] skip invalid package member %s: %v", key, err)
+				continue
+			}
 			return nil, err
 		}
 		if !ok {
@@ -60,9 +70,8 @@ func loadSkills(root string, maxPromptChars int) (map[string]SkillDefinition, er
 	return items, nil
 }
 
-// skillDirectoryKeys scans only a center root and the immediate members of
-// declared packages. Ordinary skill subdirectories (including sub-skills) are
-// resources, never implicit catalog entries.
+// skillDirectoryKeys lists standalone skills and explicitly declared package
+// members. Other package directories and standalone subdirectories are resources.
 func skillDirectoryKeys(root string) ([]string, error) {
 	entries, err := os.ReadDir(root)
 	if errors.Is(err, os.ErrNotExist) {
@@ -98,18 +107,10 @@ func skillDirectoryKeys(root string) ([]string, error) {
 			logInvalidSkillPackage(root, name, fmt.Errorf("%w: package name differs from directory", ErrInvalidSkillPath))
 			continue
 		}
-		members, err := os.ReadDir(dir)
-		if err != nil {
-			logInvalidSkillPackage(root, name, err)
-			continue
-		}
-		for _, member := range members {
-			if !isSkillCenterDirectory(member) {
-				continue
-			}
-			if info, err := os.Lstat(filepath.Join(dir, member.Name(), "SKILL.md")); err == nil && info.Mode().IsRegular() {
-				keys = append(keys, name+"/"+member.Name())
-			}
+		for _, member := range manifest.Skills {
+			// Keep missing declared members in admin listings so their invalid
+			// state remains visible instead of silently losing the package.
+			keys = append(keys, name+"/"+member.Key)
 		}
 	}
 	return keys, nil
@@ -133,7 +134,13 @@ func loadSkillDefinitionFromDir(skillDir, skillID string, maxPromptChars int) (S
 		return SkillDefinition{}, false, nil
 	}
 	skillPath := filepath.Join(skillDir, "SKILL.md")
-	content, err := os.ReadFile(skillPath)
+	var content []byte
+	var err error
+	if strings.Contains(skillID, "/") {
+		content, err = readDeclaredSkillMember(skillDir)
+	} else {
+		content, err = os.ReadFile(skillPath)
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return SkillDefinition{}, false, nil
 	}

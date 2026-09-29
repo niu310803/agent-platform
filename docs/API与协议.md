@@ -85,7 +85,7 @@ GET /ws -> request / response / stream / push / error frames
 
 `GET /api/skills` 返回全局有效技能中心目录，响应为 `{agentKey,skills,pinned,packages?}`。每项包含 `key/displayName/configured` 与可选 `description/icon/version/revision`；不返回 `name`，未配置显示名称时由服务端回退到 SKILL.md 的 `name`；不返回 `items/meta`。可选 `agentKey` 仅计算当前智能体是否已配置该技能，不筛选或重排目录；不存在的 Agent 返回 404 `agent_not_found`。不传时 `agentKey:""`、所有 `configured:false`，仍返回完整目录。技能按中心稳定顺序返回，不追加 Agent 私有技能；`skills` 和 `pinned` 均不为 null。`configured` 表示已配置，并不表示本次必须使用。
 
-`packages` 是技能包目录扫描的展示投影，每项为 `{id,name,displayName,description?,version?,skills:[{id,version?}],missingSkillIds,status}`。包信息读 package.json，成员信息读自身 SKILL.md；只有 name 必填，缺少展示名时回退 name。成员 key 为 `<package>/<skill>`，只包含当前有效的共享包成员，连接器与 Agent 私有技能不能由同短名混入。HTTP/WS 列表与置顶写响应提供相同投影；置顶写保留原有空 skills 响应语义。客户端将包选择展开为具体完整 key 并去重，query mustUseSkills 不接受包 ID。不增加 SQL 存储或单独的包执行链路。
+`packages` 是已声明技能包的展示投影，每项为 `{id,name,displayName,description?,version?,skills:[{key,id,version?}],missingSkillIds,status}`。包清单 name 和 skills 数组必填；包信息读 package.json，成员展示信息读自身 SKILL.md，缺少展示名时回退 name。API 成员 key 与兼容 id 均为 `<package>/<skill>`；清单中的相对成员 key 仅为 `<skill>`。投影包含声明成员，缺失或无效成员由 missingSkillIds/status 表达，选择时仅展开有效成员，连接器与 Agent 私有技能不能由同短名混入。HTTP/WS 列表与置顶写响应提供相同投影；置顶写保留原有空 skills 响应语义。客户端将包选择展开为具体完整 key 并去重，query mustUseSkills 不接受包 ID。不增加 SQL 存储或单独的包执行链路。
 
 普通 Agent 摘要中的 `workspaceDir` 表示该 Agent 的运行工作区，`agentConfigDir` 表示 catalog 已解析的 Agent 配置目录；两者互不替代。`agentConfigDir` 原样返回运行时 `AgentDefinition.AgentDir`，为空时省略。`/api/agent` 继续通过现有的 `source.agentDir` 返回编辑来源目录，不新增顶层字段。
 
@@ -145,9 +145,9 @@ GET /ws -> request / response / stream / push / error frames
 | POST | `/api/admin/skills/create` | body: `key`、`skillMd`、`files[]` | 创建后的 skill 详情 |
 | POST | `/api/admin/skills/import` | multipart: `key`、`file`；可选 `overwrite` | 原子校验并导入完整 ZIP，返回 skill 详情 |
 | POST | `/api/admin/skills/delete` | body: `key` | 删除结果；仍被 agent 引用时返回 409 和 `usedByAgents` |
-| GET | `/api/admin/skill-packages` | 无 | 返回 Platform 已安装技能包及其子技能 ID、版本和包摘要 |
+| GET | `/api/admin/skill-packages` | 无 | 返回 Platform 已安装技能包及声明成员的完整 key、兼容 id、版本和包摘要 |
 | POST | `/api/admin/skill-packages/import` | query: `key`、可选 `version`；raw ZIP body | 原子校验并安装或更新技能包，返回包状态与实际安装的子技能 |
-| GET/PUT | `/api/admin/skill-packages/manifest` | GET query `key`；PUT body `key/content/baseSha256` | 读取或条件保存包自身 `package.json`；返回 `content/sha256` |
+| GET/PUT | `/api/admin/skill-packages/manifest` | GET query `key`；PUT body `key/content/baseSha256` | 读取或条件保存包信息与成员声明 `package.json`；返回 `content/sha256` |
 | POST | `/api/admin/skill-packages/delete` | body: `key` | 原子卸载技能包及其子技能，返回删除的子技能列表 |
 | POST | `/api/admin/skill-packages/skills/delete` | body: `packageId`、`skillId` | 原子删除包内单个子技能并更新包状态 |
 | GET/PUT | `/api/admin/skills/file` | query/body: `key`、`path`、`content`、`baseSha256` | 读取或保存 UTF-8 文本文件 |
@@ -182,13 +182,25 @@ GET /ws -> request / response / stream / push / error frames
 
 普通技能删除先移入技能根同级备份，再执行 skills reload；reload 失败恢复整目录及 metadata，成功后清理备份。包内子技能仍使用技能包专用删除接口，普通删除不会绕过包归属保护。
 
-技能中心采用以下目录结构：顶层 `skills-center/<skill>/SKILL.md` 是独立技能；`skills-center/<package>/package.json` 标识技能包，成员位于包内一层 `<skill>/SKILL.md`。`package.json` 为 JSON，只要求非空合法 `name`，`displayName/description/version/triggers/metadata` 及多语言字段均可选；不持久化 `skills` 明细。包成员通过扫描目录产生，展示信息来自成员自己的 SKILL.md。空包有效；删除最后成员保留包信息。
+技能中心采用以下目录结构：顶层 `skills-center/<skill>/SKILL.md` 是独立技能；`skills-center/<package>/package.json` 标识技能包。清单必须包含非空合法 `name` 和 `skills` 数组，每个成员至少包含相对包根的 `key`：
 
-`GET /api/admin/skills` 列表与详情的 `packageId` 仅用于分组。独立技能 key 为 `<skill>`，包内 key 为 `<package>/<skill>`，不能以短名替代包内 key；同名技能可同时存在并独立选择、编辑和更新。`GET /api/admin/skill-packages` 返回扫描所得成员与实际版本；缺少版本保持空值，不借用包版本。包展示文案复用请求语言解析规则，缺少展示名回退 name。列表读取不改写文件，也不维护 SQL 或第二份成员清单。成员文件删除后从下次扫描中消失，无效成员可返回诊断。
+```json
+{
+  "name": "office",
+  "skills": [{ "key": "export" }, { "key": "calendar" }]
+}
+```
 
-`POST /api/admin/skill-packages/import` 接收原始 ZIP，不接受文件系统路径。新 ZIP 为 package.json 和成员目录，可带一层包目录；历史市场 manifest.json ZIP 仅作导入兼容，由 Platform 转换为新布局。校验在隐藏 staging 完成，发布时只替换 `skills-center/<package>`；包外同名技能不参与冲突、覆盖或删除。普通技能安装只替换顶层对应技能，不能覆盖技能包根目录。新包移除的成员随本包更新一起移除。整个目录切换与 Catalog 重载失败会恢复旧包，临时 ZIP/staging/backup 成功后清理。
+成员 key 必须是非空合法单段目录名，禁止路径分隔符、目录逃逸及大小写重复；成员目录为 `<package>/<key>/SKILL.md`。`skills` 缺失、`null` 或非数组均无效；`skills: []` 是有效空包，删除最后成员仍保留包。`displayName/description/version/triggers/metadata` 为可选包信息。声明是唯一成员集合，额外目录不会隐式成为成员；成员名称、描述与版本读取各自 `SKILL.md`。成员和包顶层的扩展属性可保留，但不替代成员自身 `SKILL.md` 的展示信息；保存、导入和删除其他成员不会丢弃这些扩展属性。
 
-`GET/PUT /api/admin/skill-packages/manifest` 用于包信息编辑。PUT 需要读取时的 `baseSha256`，并发修改返回 409；禁止通过编辑 name 更换包身份。保存复用 Catalog 事务，重载失败恢复原文件。API 的成员数组为动态投影，不写回 package.json。整包卸载和成员删除仍检查 Agent 使用情况，并仅操作对应包范围。
+`GET /api/admin/skills` 列表与详情的 `packageId` 仅用于分组。独立技能 key 为 `<skill>`，包成员 API `key` 为 `<package>/<skill>`，包成员投影保留兼容字段 `id`，两者表示同一完整身份；它们不同于 `package.json` 内的相对成员 key。不能以短名替代可执行技能的完整 key；同名独立技能与包成员可同时存在并独立选择、编辑和更新。`GET /api/admin/skill-packages` 返回声明成员与各自实际版本，缺少版本保持空值，不借用包版本。包展示文案复用请求语言解析规则，缺少展示名回退 name。声明成员缺失或不可读取时保留成员记录与 diagnostics，不使整个包消失，也不进入可执行技能集合。列表读取不改写文件，不维护 SQL 或第二份成员清单。
+
+`POST /api/admin/skill-packages/import` 接收原始 ZIP，不接受文件系统路径。新 ZIP 包含显式 `skills` 的 package.json 和成员目录，可带一层包目录；全部声明成员必须完整并通过安全校验。缺失成员返回错误，未声明目录不参与成员投影。历史市场 manifest.json ZIP 仅作导入兼容，由 Platform 转换为显式 skills 的新布局。校验在隐藏 staging 完成，发布时只替换 `skills-center/<package>`；包外同名技能不参与冲突、覆盖或删除。普通技能安装只替换顶层对应技能，不能覆盖技能包根目录。新包移除的成员随本包更新一起移除；仍被 Agent 引用时拒绝移除。整个目录切换与 Catalog 重载失败会恢复旧包，临时 ZIP/staging/backup 成功后清理。
+
+`GET/PUT /api/admin/skill-packages/manifest` 用于编辑包信息与成员声明。PUT 需要读取时的 `baseSha256`，并发修改返回 409；禁止通过编辑 name 更换包身份。保存可声明尚未创建的成员并返回缺失诊断，随后通过完整 key 调用单技能创建或导入接口补齐；未声明的包成员不能直接创建或导入。保存严格校验 JSON、成员 key 与已存在路径的安全性。移除声明使成员离开可用列表，但保留磁盘文件；移除仍被 Agent 引用的成员返回冲突。保存复用 Catalog 事务，重载失败恢复原文件。API 的完整成员投影不能直接替代清单中的相对 key 数组。整包卸载和成员删除继续检查 Agent 使用情况；成员删除原子同步移除声明和目录，失败时恢复两者。
+
+启动加载 Catalog 前，对已安装但 package.json 缺少 skills 的历史包执行一次显式补齐，按原直接子目录规则建立声明，并在技能根外保留原文件备份；下次启动不再重复迁移。已有 skills 但内容非法的清单不自动修复。旧 `.package` 平铺记录迁移同样输出显式 skills，保留原顶层技能以兼容旧 Agent 引用。普通查询、热重载及新 ZIP 导入不触发隐式成员推断。
+
 
 
 `/api/admin/registries` 是列表接口，不返回 registry 文件绝对路径、完整 `diagnostics[]` 或文件大小；编辑器应通过 `/api/admin/registries/detail` 获取 `source`、完整诊断、`content`、`parsed` 与 `size`。

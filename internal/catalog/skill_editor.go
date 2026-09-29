@@ -146,7 +146,16 @@ func (r *FileRegistry) AdminSkills() ([]AdminSkill, error) {
 	for _, key := range keys {
 		item, err := buildAdminSkill(root, key, usage[key], false)
 		if err != nil {
-			return nil, err
+			if !strings.Contains(key, "/") {
+				return nil, err
+			}
+			// A malformed declared member must not hide its package siblings.
+			dir := filepath.Join(root, filepath.FromSlash(key))
+			item = AdminSkill{Key: key, Name: key, Status: AdminSkillStatusInvalid,
+				Source:       EditableSkillSource{Kind: "skills-center", Path: dir, SkillDir: dir},
+				UsedByAgents: append([]string(nil), usage[key]...),
+				Diagnostics:  []AdminSkillDiagnostic{skillDiagnostic("error", "invalid_package_member", err.Error(), dir)},
+			}
 		}
 		items = append(items, item)
 	}
@@ -174,6 +183,10 @@ func (r *FileRegistry) AdminSkill(key string) (AdminSkill, bool, error) {
 	}
 	info, err := os.Lstat(dir)
 	if errors.Is(err, os.ErrNotExist) {
+		if strings.Contains(key, "/") {
+			item, buildErr := buildAdminSkill(root, key, usage[key], true)
+			return item, buildErr == nil, buildErr
+		}
 		return AdminSkill{}, false, nil
 	}
 	if err != nil {
@@ -1135,11 +1148,20 @@ func buildAdminSkill(root string, key string, usedBy []string, includeFiles bool
 	sort.Strings(item.UsedByAgents)
 
 	skillPath := filepath.Join(skillDir, "SKILL.md")
-	content, err := os.ReadFile(skillPath)
+	var content []byte
+	if strings.Contains(key, "/") {
+		content, err = readDeclaredSkillMember(skillDir)
+	} else {
+		content, err = os.ReadFile(skillPath)
+	}
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		item.Status = AdminSkillStatusInvalid
 		item.Diagnostics = append(item.Diagnostics, skillDiagnostic("error", "missing_skill_md", "SKILL.md is required", skillPath))
+		if _, statErr := os.Lstat(skillDir); errors.Is(statErr, os.ErrNotExist) {
+			item.Meta = map[string]any{"promptTruncated": false}
+			return item, nil
+		}
 	case err != nil:
 		return AdminSkill{}, err
 	default:
@@ -1487,6 +1509,16 @@ func editableSkillDir(root string, key string) (string, error) {
 		}
 		if manifest.Name != strings.SplitN(key, "/", 2)[0] {
 			return "", fmt.Errorf("%w: package name differs from directory", ErrInvalidSkillPath)
+		}
+		declared := false
+		for _, member := range manifest.Skills {
+			if member.Key == filepath.Base(dir) {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			return "", fmt.Errorf("%w: skill %q is not declared in package.json skills; declare the member before creating or importing it", ErrInvalidSkillPath, key)
 		}
 	} else if _, err := os.Lstat(filepath.Join(dir, "SKILL.md")); errors.Is(err, os.ErrNotExist) {
 		if _, err := os.Lstat(filepath.Join(dir, "package.json")); err == nil {
