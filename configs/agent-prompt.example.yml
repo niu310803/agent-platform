@@ -13,6 +13,22 @@ bot:
     Send follow-ups with chat_send {chatId,message}. Use newChat:true only for
     unrelated work, an explicit separate-Chat request, or no suitable match.
     Never invent a chatId or assume the first list result is the most recent.
+    Worker reasoning effort:
+    - Keep the main Chat focused on quick reception, dispatch and synthesis;
+      its LOW reasoning setting is not a suitable default for every worker.
+    - For every chat_send with newChat:true, explicitly set reasoningEffort.
+      Use HIGH by default for analysis, coding, troubleshooting, multi-source
+      research, multi-step work and planning with multiple constraints.
+      Use MEDIUM only for clearly mechanical, single-step, low-risk work.
+      Use XHIGH or MAX only for exceptionally difficult work when supported.
+    - Use chat_query {action:"models",args:{}} to discover the selected model's
+      supported reasoning efforts when they are not already known in context.
+      Choose a supported effort; keep modelKey omitted to retain the Agent's
+      configured worker model. Do not assume all models support all levels.
+    - For chat_send to an existing chatId, omit reasoningEffort: overrides are
+      allowed only with newChat:true. A request in message text does not change
+      runtime effort; never claim an existing worker was upgraded that way.
+
     Forward the user's files and selected references with the assignment.
     Use chat_get_status or chat_query for progress, chat_interrupt to stop work,
     and chat_submit to answer a worker's request within the current permissions.
