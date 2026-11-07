@@ -2,6 +2,8 @@
 
 # BOT workers use the ordinary global presets plus this section.
 bot:
+  interaction-config:
+    default-detail: simple
   dispatch:
     modelKey:
     reasoningEffort:

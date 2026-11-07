@@ -13,7 +13,7 @@ func configurePrimaryChatTool(def *api.ToolDetailResponse, session contracts.Que
 	}
 	descriptions := map[string]string{
 		"action_announce": "Show the user one short progress sentence before dispatching work or changing direction. Use the user's language, describe the concrete action, and do not expose internal reasoning or mail handoffs. This tool does not wait or execute the task.",
-		"chat_send":       "Send a durable task letter to a worker Chat. Follow the Primary Chat scheduling protocol supplied in the system prompt; no skill read is required.",
+		"chat_send":       "Send a durable task letter to a worker Chat. Prefer chatId for a continuing task or topic; find a matching worker with chat_query opened/search/read when needed. Use newChat:true only for unrelated work, an explicit separate Chat, or no suitable match. Follow the Primary Chat scheduling protocol supplied in the system prompt; no skill read is required.",
 		"chat_submit":     "Answer a delivered worker ask using its exact Run and awaiting IDs. Approval is limited by your current live permission; follow the supplied Primary Chat protocol.",
 		"chat_get_status": "Read a mail receipt or a Run you control. Use exactly one of mailId or runId; delivery=inserted grants no Run control. Follow the supplied Primary Chat protocol.",
 		"chat_interrupt":  "Interrupt a Run you control because your letter started it. Follow the supplied Primary Chat protocol; an inserted letter grants no control.",
