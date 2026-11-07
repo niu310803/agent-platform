@@ -11,7 +11,9 @@ import (
 	"agent-platform/internal/config"
 	"agent-platform/internal/contracts"
 	"agent-platform/internal/contracts/queryinput"
+	"agent-platform/internal/interaction"
 	runtimetypes "agent-platform/internal/runtime/types"
+	"agent-platform/internal/stream"
 )
 
 func TestPrimaryChatEligibilityKeepsOtherModesUnchanged(t *testing.T) {
@@ -93,5 +95,45 @@ func TestPrimarySideLanesKeepAgentExecutionContext(t *testing.T) {
 				t.Fatalf("side lane inherited scheduling context: %+v", session)
 			}
 		})
+	}
+}
+
+// Worker Runs deliver detailed whatever the Agent configures; the primary
+// Chat and every side lane keep following the Agent.
+func TestBotWorkerRunsAlwaysDeliverDetailed(t *testing.T) {
+	for _, configured := range []string{"", "simple", "detailed"} {
+		agentDetail := stream.ResolveDetailLevel(configured)
+		for _, tc := range []struct {
+			name string
+			mode string
+			req  runtimetypes.QueryCommand
+			want stream.DetailLevel
+		}{
+			{"primary", "BOT", runtimetypes.QueryCommand{Primary: true}, agentDetail},
+			{"worker", "BOT", runtimetypes.QueryCommand{}, stream.DetailDetailed},
+			{"worker-btw", "BOT", runtimetypes.QueryCommand{Lane: "btw"}, agentDetail},
+			{"worker-explain", "BOT", runtimetypes.QueryCommand{Lane: "explain"}, agentDetail},
+			{"general", "GENERAL", runtimetypes.QueryCommand{}, agentDetail},
+		} {
+			t.Run(configured+"/"+tc.name, func(t *testing.T) {
+				b := New(Dependencies{Config: config.Config{Paths: config.PathsConfig{ChatsDir: t.TempDir()}}})
+				def := catalog.AgentDefinition{Key: "a", Mode: tc.mode, Tools: []string{"file_read"}}
+				if configured != "" {
+					def.InteractionConfig = &interaction.Config{DefaultDetail: configured}
+				}
+				req := tc.req
+				req.ChatID, req.AgentKey = "c", "a"
+				session, err := b.BuildQuerySession(t.Context(), req, chat.Summary{ChatID: "c"}, def, Options{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if session.Detail != tc.want {
+					t.Fatalf("detail=%q want %q", session.Detail, tc.want)
+				}
+				if def.InteractionConfig != nil && def.InteractionConfig.DefaultDetail != configured {
+					t.Fatal("published definition mutated")
+				}
+			})
+		}
 	}
 }

@@ -291,6 +291,12 @@ func (s *Builder) BuildQuerySession(ctx context.Context, req runtimetypes.QueryC
 		InteractionConfig:        func() *interaction.Config { c := agentDef.Interaction(); return &c }(),
 		StaticRuntimeEnv:         runtimeEnvOverrides,
 	}
+	if worker {
+		// Ordinary users never see BOT worker Chats; they are opened to debug,
+		// so worker Runs always deliver the full process. Side lanes follow the
+		// Agent like the primary Chat does.
+		session.Detail = stream.DetailDetailed
+	}
 	if agentbuiltin.NativePlanning(agentDef.Mode, agentDef.ACPBridgeID) && !session.PlanningMode && agentbuiltin.IsConfirmedPlanRun(req.Params) {
 		// A Run started from a confirmed plan is an ordinary Run of this Agent
 		// with the configured execution exclusions applied to its tools.

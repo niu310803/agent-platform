@@ -97,7 +97,7 @@ WebClient 普通主聊天文本统一发送，待发消息按身份隔离保存�
 
 主要聊天的必要调度协议来自随包内置的 task-control `references/primary-chat.md`，装配时直接进入 system prompt，不要求读取 Skill 文件、不挂载技能或增加工具。协议包含发信与补充、文件复制、回执及控制资格、请示代答、查询参数和跳数限制。六个工具的主要聊天专用说明同时使用正确的档位/模型默认值，不再要求先读不可用的技能。`configs/agent-prompt.yml` 的 `bot.system-prompt` 仍控制部署侧调度提示词；即使自定义或清空该项，必要协议也独立保留。
 
-BOT 的每条非主聊天都移除 `chat_send`、`chat_submit`、`chat_get_status`、`chat_interrupt`，保留原本有效的 `chat_notify`；用户直接输入和重启不改变身份。不再保存或读取 `mailNewChat`。BOT 不能作为 TEAM 成员或 `agent_invoke` 目标。其他 Agent 只允许寄往 BOT 主聊天，不能创建、读取或控制其分身；只有 BOT 当前主聊天可以给自己创建分身。BOT 主聊天的 `chat_query opened` 从 chats.db 的 `agentKey + primary:false` 列表读取并复核权限，独立于会被清空的 mail.db。
+BOT 的每条非主聊天都移除 `chat_send`、`chat_submit`、`chat_get_status`、`chat_interrupt`，保留原本有效的 `chat_notify`；用户直接输入和重启不改变身份。分身主 lane 的 Run 与 `/api/chat` 读取固定使用 detailed 档位，不看 Agent 的 `defaultDetail`，见 [细节等级](API与协议.md#细节等级与-runactivity)。不再保存或读取 `mailNewChat`。BOT 不能作为 TEAM 成员或 `agent_invoke` 目标。其他 Agent 只允许寄往 BOT 主聊天，不能创建、读取或控制其分身；只有 BOT 当前主聊天可以给自己创建分身。BOT 主聊天的 `chat_query opened` 从 chats.db 的 `agentKey + primary:false` 列表读取并复核权限，独立于会被清空的 mail.db。
 
 BOT 不允许把已有分身提升为主聊天；“重新开始”先清除主指针，下一次 `/api/send` 创建新主聊天。客户端必须先提示：旧分身任务与结果仍属于旧聊天，不会自动转投新主聊天，尚未投递的工作可能取消。L2 与后续 L3 保持 ChatID；L3 具体压缩方式尚未实现。外部 Agent 给 BOT 派活后的跨 Run 最终结果关联也仍待设计。
 

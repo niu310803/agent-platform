@@ -468,7 +468,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, api.Failure(http.StatusInternalServerError, err.Error()))
 		return
 	}
-	response.Display = s.chatDisplay(response.AgentKey, chatReadDetail(response, detail))
+	response.Display = s.chatDisplay(response.AgentKey, chatReadDetail(response, detail, s.botWorkerChat(response)))
 	response.Events = s.detailFilter(response.Display.EffectiveDetail).FilterEvents(response.Events)
 	writeJSON(w, http.StatusOK, api.Success(response))
 }

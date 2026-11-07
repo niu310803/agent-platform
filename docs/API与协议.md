@@ -609,10 +609,10 @@ BOT 首次发送不传 chatId，由 `/api/send` 原子创建主聊天；首次�
 
 #### 细节等级与 run.activity
 
-细节等级 `simple`/`detailed` 由后端按 Agent 配置决定，请求不能指定。Run 受理时按实际准入 Agent 的 `interactionConfig.defaultDetail` > agent-settings.yml 对应 mode 的 `interaction-config.default-detail` > simple 冻结，整个 Run 期间所有观察者收到同一档事件。所有开 Run 的入口（`/api/send`、`/api/query` 含 btw/explain、`/api/execute`、`chat_send`、Automation、批准计划后启动的执行 Run）都按当时的 Agent 配置定档；排队邮件在开 Run 时定档；TEAM 子任务与 steer 不改变档位。档位只在进程内保存，不落盘（Platform 重启本就取消未完成 Run）。
+细节等级 `simple`/`detailed` 由后端按 Agent 配置决定，请求不能指定。Run 受理时按实际准入 Agent 的 `interactionConfig.defaultDetail` > agent-settings.yml 对应 mode 的 `interaction-config.default-detail` > simple 冻结，整个 Run 期间所有观察者收到同一档事件。所有开 Run 的入口（`/api/send`、`/api/query` 含 btw/explain、`/api/execute`、`chat_send`、Automation、批准计划后启动的执行 Run）都按当时的 Agent 配置定档；BOT 分身（非主要聊天）主 lane 的 Run 例外，固定 detailed，因为分身只供开发者调试查看；分身上的 btw/explain 与主要聊天一样按 Agent 配置；排队邮件在开 Run 时定档；TEAM 子任务与 steer 不改变档位。档位只在进程内保存，不落盘（Platform 重启本就取消未完成 Run）。
 
 - `/api/send`、`/api/query`、`/api/attach` 不接受 `detail`：HTTP 带该 URL 参数（含空值）返回 400 `detail_not_allowed`，WS 帧顶层带 `detail` 返回 400 `invalid_detail` 错误帧。
-- `/api/chat` 是唯一可选档位的读取：HTTP 用 URL 参数（`?detail=detailed`），WS 用请求帧顶层字段（与 `type`、`id` 并列，见[帧类型](#帧类型)），取值为 `simple` 或 `detailed`（旧 `summary`、`full`、`none` 均拒绝），其他值返回 400 `invalid_detail`。Chat 有进行中的 Run 时，整个响应（含之前已结束 Run 的历史事件）按该 Run 的档位过滤，请求的 `detail` 忽略；没有进行中的 Run 时按请求档位读取，省略时按 Chat owner Agent 当前默认值。`activeRun.detail` 返回 Run 的档位。
+- `/api/chat` 是唯一可选档位的读取：HTTP 用 URL 参数（`?detail=detailed`），WS 用请求帧顶层字段（与 `type`、`id` 并列，见[帧类型](#帧类型)），取值为 `simple` 或 `detailed`（旧 `summary`、`full`、`none` 均拒绝），其他值返回 400 `invalid_detail`。Chat 有进行中的 Run 时，整个响应（含之前已结束 Run 的历史事件）按该 Run 的档位过滤，请求的 `detail` 忽略；没有进行中的 Run 时，BOT 分身固定按 detailed 读取并忽略请求档位，其他 Chat 按请求档位读取，省略时按 Chat owner Agent 当前默认值。`activeRun.detail` 返回 Run 的档位。
 
 `/api/chat` 返回 `display: {defaultDetail,effectiveDetail}`，前者为 Agent 有效默认值，后者为实际下发档位。流式 `run.start` 在下发时附加相同 display（不修改共享事件或落盘）；HTTP SSE 另提供 `X-Agent-Default-Detail` 和 `X-Event-Detail` 响应头。Agent 不存在时兜底 simple，不阻止历史读取。客户端展示后端下发的事件，不再按档位二次过滤。
 

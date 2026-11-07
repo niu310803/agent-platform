@@ -57,10 +57,20 @@ func (s *Server) chatDisplay(agentKey string, override stream.DetailLevel) api.E
 
 // chatReadDetail is the level a Chat read is delivered at. While a Run is
 // active every reader gets that Run's level and the requested one is
-// ignored; a Chat with no active Run can be read at any level.
-func chatReadDetail(response api.ChatDetailResponse, requested stream.DetailLevel) stream.DetailLevel {
+// ignored. A BOT worker Chat is only opened to debug, so it is always read
+// at detailed; any other Chat with no active Run can be read at any level.
+func chatReadDetail(response api.ChatDetailResponse, requested stream.DetailLevel, botWorker bool) stream.DetailLevel {
 	if response.ActiveRun != nil && response.ActiveRun.Detail != "" {
 		return response.ActiveRun.Detail
 	}
+	if botWorker {
+		return stream.DetailDetailed
+	}
 	return requested
+}
+
+// botWorkerChat reports a BOT Chat that is not its Agent's primary Chat.
+func (s *Server) botWorkerChat(response api.ChatDetailResponse) bool {
+	isBot := s.deps.Conversation != nil && s.deps.Conversation.IsBotAgent != nil && s.deps.Conversation.IsBotAgent(response.AgentKey)
+	return isBot && !response.Primary
 }

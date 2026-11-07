@@ -2,6 +2,7 @@ package server
 
 import (
 	"agent-platform/internal/api"
+	"agent-platform/internal/chat"
 	"agent-platform/internal/config"
 	"agent-platform/internal/stream"
 	platformws "agent-platform/internal/ws"
@@ -341,11 +342,111 @@ func TestSimpleDeliveryKeepsSimpleVisibleToolCalls(t *testing.T) {
 
 func TestChatReadDetailFollowsActiveRun(t *testing.T) {
 	active := api.ChatDetailResponse{ActiveRun: &api.ActiveRunInfo{RunID: "run_1", Detail: stream.DetailSimple}}
-	if got := chatReadDetail(active, stream.DetailDetailed); got != stream.DetailSimple {
+	if got := chatReadDetail(active, stream.DetailDetailed, false); got != stream.DetailSimple {
 		t.Fatalf("active Chat read at %q, want the Run's simple", got)
 	}
-	if got := chatReadDetail(api.ChatDetailResponse{}, stream.DetailDetailed); got != stream.DetailDetailed {
+	if got := chatReadDetail(api.ChatDetailResponse{}, stream.DetailDetailed, false); got != stream.DetailDetailed {
 		t.Fatalf("idle Chat read at %q, want the requested detailed", got)
+	}
+	if got := chatReadDetail(api.ChatDetailResponse{}, stream.DetailSimple, true); got != stream.DetailDetailed {
+		t.Fatalf("idle BOT worker read at %q, want detailed", got)
+	}
+}
+
+// A BOT worker Chat is only opened to debug: its Runs and every read of it
+// deliver detailed although the Agent defaults to simple, while the primary
+// Chat keeps the Agent default and the reader's choice.
+func TestBotWorkerChatAlwaysDeliversDetailed(t *testing.T) {
+	f := newDatetimeToolLoopFixture(t, "")
+	path := filepath.Join(f.cfg.Paths.AgentsDir, "mock-agent", "agent.yml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(string(data), "mode: GENERAL", "mode: BOT", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.registry.Reload(context.Background(), "agents"); err != nil {
+		t.Fatal(err)
+	}
+	if def, _ := f.registry.AgentDefinition("mock-agent"); def.Mode != "BOT" {
+		t.Fatalf("fixture mode=%s", def.Mode)
+	}
+	store := f.chats.(*chat.FileStore)
+	seedAgentModeChat(t, store, "bot-main", "run-main", "mock-agent", "BOT", 0)
+	seedAgentModeChat(t, store, "bot-worker", "run-seed", "mock-agent", "BOT", 1)
+	if _, err := store.SetChatPrimary("mock-agent", "bot-main"); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	f.server.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/query", strings.NewReader(`{"chatId":"bot-worker","message":"time"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("query: %d %s", rec.Code, rec.Body.String())
+	}
+	sawTool, runID := false, ""
+	for _, event := range decodeSSEMessages(t, rec.Body.String()) {
+		if event["type"] == "tool.start" {
+			sawTool = true
+		}
+		if event["type"] == "run.start" {
+			runID, _ = event["runId"].(string)
+			if display, _ := event["display"].(map[string]any); display["defaultDetail"] != "simple" || display["effectiveDetail"] != "detailed" {
+				t.Fatalf("worker run display: %#v", event)
+			}
+		}
+	}
+	if !sawTool {
+		t.Fatal("worker Run hid tool calls")
+	}
+	waitRunTerminal(t, f.server, runID)
+
+	hasTool := func(events []stream.EventData) bool {
+		for _, event := range events {
+			if event.Type == "tool.snapshot" {
+				return true
+			}
+		}
+		return false
+	}
+	read := func(chatID, detail string) api.ChatDetailResponse {
+		suffix := ""
+		if detail != "" {
+			suffix = "&detail=" + detail
+		}
+		rec := httptest.NewRecorder()
+		f.server.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/chat?chatId="+chatID+suffix, nil))
+		var response api.ApiResponse[api.ChatDetailResponse]
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &response) != nil {
+			t.Fatalf("chat %s detail=%q: %d %s", chatID, detail, rec.Code, rec.Body.String())
+		}
+		return response.Data
+	}
+	for _, detail := range []string{"", "simple", "detailed"} {
+		got := read("bot-worker", detail)
+		if got.Display.DefaultDetail != "simple" || got.Display.EffectiveDetail != "detailed" || !hasTool(got.Events) {
+			t.Fatalf("worker read detail=%q display=%+v tools=%v", detail, got.Display, hasTool(got.Events))
+		}
+	}
+	if got := read("bot-main", ""); got.Display.EffectiveDetail != "simple" {
+		t.Fatalf("primary read display=%+v", got.Display)
+	}
+	if got := read("bot-main", "detailed"); got.Display.EffectiveDetail != "detailed" {
+		t.Fatalf("primary requested read display=%+v", got.Display)
+	}
+
+	srv := newLoopbackServer(t, f.server)
+	conn, _, err := gws.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/ws", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	readConnectedPush(t, conn)
+	if err := conn.WriteJSON(map[string]any{"frame": "request", "type": "/api/chat", "id": "ws-worker", "detail": "simple", "payload": map[string]any{"chatId": "bot-worker"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := waitForWebSocketResponseData[api.ChatDetailResponse](t, conn, "ws-worker"); got.Display.EffectiveDetail != "detailed" || !hasTool(got.Events) {
+		t.Fatalf("WS worker read display=%+v tools=%v", got.Display, hasTool(got.Events))
 	}
 }
 
