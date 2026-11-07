@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	. "agent-platform/internal/accesspolicy"
 	"agent-platform/internal/config"
 	. "agent-platform/internal/contracts"
+	"agent-platform/internal/scriptstate"
 	"agent-platform/internal/shellreview/identity"
 	shellplan "agent-platform/internal/shellreview/plan"
 	"agent-platform/internal/shellreview/types"
@@ -335,5 +337,33 @@ func TestAuthoredExtensionlessAndForeignBinary(t *testing.T) {
 	}
 	if got := ReviewBashCommand(config.AccessPolicyConfig{}, ctx.Session, "./node /tmp/task.js", "", nil, ctx); !got.RequiresApproval() {
 		t.Fatalf("custom binary inherited temp Node exemption: %+v", got)
+	}
+}
+
+// A script an earlier Run of this Chat wrote through the file tools is exempt
+// like this Run's own, as long as the inherited hash matches the file.
+func TestChatAuthoredScriptFromEarlierRun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix interpreter fixtures")
+	}
+	f := newCapabilityFixture(t, AccessLevelAskForApproval)
+	script := filepath.Join(f.chat, "task.sh")
+	data := []byte("#!/bin/sh\necho ok\n")
+	if err := os.WriteFile(script, data, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	for _, tc := range []struct {
+		hash string
+		want Decision
+	}{{fmt.Sprintf("%x", sum), DecisionAllow}, {strings.Repeat("0", 64), DecisionRequiresApproval}} {
+		session := f.session
+		session.ChatAuthoredFiles = []scriptstate.Proof{{Path: script, SHA256: tc.hash}}
+		ctx := &ExecutionContext{Session: session}
+		ctx.EnsureAuthoredScripts()
+		got := ReviewBashCommand(config.AccessPolicyConfig{}, session, "sh task.sh", f.chat, nil, ctx)
+		if got.Decision != tc.want || (tc.want == DecisionAllow) != hasLeaf(got, "bash-access:authored-script") {
+			t.Fatalf("hash %s: got %+v, want %s", tc.hash[:8], got, tc.want)
+		}
 	}
 }

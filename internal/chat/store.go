@@ -128,6 +128,12 @@ type SkillReferenceReader interface {
 	PriorSkillReferenceIDs(chatID, excludeRunID string, limit int) ([]string, error)
 }
 
+// AuthoredFileReader lists files whose content the main lane wrote through
+// file_write/file_edit, from the platform-written tool results.
+type AuthoredFileReader interface {
+	AuthoredFiles(chatID string) ([]AuthoredFile, error)
+}
+
 type FileStore struct {
 	root        string
 	mu          sync.Mutex

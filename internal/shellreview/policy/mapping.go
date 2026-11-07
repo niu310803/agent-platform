@@ -77,7 +77,7 @@ func (r Reviewer) SkillScript(path string) shellplan.BashPlan {
 }
 
 func (r Reviewer) AuthoredScript(path string) shellplan.BashPlan {
-	return shellplan.New(r.command, r.accessLevel, DecisionAllow, "script was written by this run in the current Chat directory", "bash-access:authored-script", path)
+	return shellplan.New(r.command, r.accessLevel, DecisionAllow, "script was written by this Chat's file tools in the current Chat directory", "bash-access:authored-script", path)
 }
 
 func (r Reviewer) InlineCode(interpreter string) shellplan.BashPlan {

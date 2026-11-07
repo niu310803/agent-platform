@@ -1,4 +1,6 @@
-// Package scriptstate keeps non-persistent, run-owned proofs of complete writes.
+// Package scriptstate keeps run-owned, in-memory proofs of complete writes. A
+// Run may start with the proofs its Chat's earlier file tool results recorded;
+// nothing here is persisted.
 package scriptstate
 
 import (
@@ -12,6 +14,9 @@ import (
 )
 
 type Owner struct{ Agent, Run, Environment string }
+
+// Proof names the content an earlier Run of the same Chat wrote to a file.
+type Proof struct{ Path, SHA256 string }
 type entry struct {
 	hash string
 	size int64
@@ -62,6 +67,30 @@ func (s *Scope) Record(owner Owner, path string, content []byte, previousHash st
 		return
 	}
 	s.files[p.Key] = next
+	s.revision++
+}
+
+// Inherit adds a proof recorded by an earlier Run of the same Chat. Only its
+// hash is taken over; Matches compares the file's bytes before every use. A
+// proof already held is kept, so callers pass the most recent first.
+func (s *Scope) Inherit(p Proof) {
+	if s == nil {
+		return
+	}
+	c, err := pathutil.Canonicalize(p.Path)
+	if err != nil {
+		return
+	}
+	info, err := os.Stat(c.Host)
+	if err != nil || !info.Mode().IsRegular() {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.files[c.Key]; exists {
+		return
+	}
+	s.files[c.Key] = entry{hash: p.SHA256, size: info.Size()}
 	s.revision++
 }
 

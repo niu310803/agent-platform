@@ -491,7 +491,10 @@ type QuerySession struct {
 	// ControlReadonlyRoots protects source/configuration from ordinary mutation.
 	ControlReadonlyRoots []string `json:"-"`
 	// SkillScripts is an admission-built, memory-only grant for this run.
-	SkillScripts           *skillsexec.Scope `json:"-"`
+	SkillScripts *skillsexec.Scope `json:"-"`
+	// ChatAuthoredFiles are the Chat-directory files this Chat's main lane last
+	// wrote through the file tools, most recent first; admission-built.
+	ChatAuthoredFiles      []scriptstate.Proof `json:"-"`
 	AgentHasRuntimeSandbox bool
 	WorkspaceRoot          string
 	ChatRoot               string
@@ -667,6 +670,9 @@ func (c *ExecutionContext) ScriptOwner() scriptstate.Owner {
 func (c *ExecutionContext) EnsureAuthoredScripts() {
 	if c != nil && !c.AuthoredScripts.Owns(c.ScriptOwner()) {
 		c.AuthoredScripts = scriptstate.New(c.ScriptOwner())
+		for _, proof := range c.Session.ChatAuthoredFiles {
+			c.AuthoredScripts.Inherit(proof)
+		}
 	}
 }
 

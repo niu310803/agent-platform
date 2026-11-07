@@ -111,3 +111,38 @@ func TestGuestContentMismatchRevokesProof(t *testing.T) {
 		t.Fatal("guest mutation did not revoke the environment's proof")
 	}
 }
+
+func TestInheritedProofKeepsMostRecentAndRechecksBytes(t *testing.T) {
+	owner := Owner{"ordinary", "run-2", "host"}
+	path := filepath.Join(t.TempDir(), "script")
+	if err := os.WriteFile(path, []byte("current"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	hash := func(s string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(s))) }
+	scope := New(owner)
+	scope.Inherit(Proof{Path: path, SHA256: hash("current")})
+	scope.Inherit(Proof{Path: path, SHA256: hash("older")}) // an older record of the same file
+	scope.Inherit(Proof{Path: filepath.Join(filepath.Dir(path), "missing"), SHA256: hash("x")})
+	if !scope.Matches(owner, path) || scope.Matches(Owner{"ordinary", "run-1", "host"}, path) {
+		t.Fatal("inherited proof must belong to this Run and keep the most recent hash")
+	}
+	// An inherited proof advances and is revoked exactly like a recorded one.
+	if err := os.WriteFile(path, []byte("edited"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	scope.Record(owner, path, []byte("edited"), hash("current"), false)
+	if !scope.Matches(owner, path) {
+		t.Fatal("edit of inherited content lost its proof")
+	}
+	if err := os.WriteFile(path, []byte("tampered"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if scope.Matches(owner, path) {
+		t.Fatal("changed bytes kept the inherited proof")
+	}
+	stale := New(owner)
+	stale.Inherit(Proof{Path: path, SHA256: hash("current")})
+	if stale.Matches(owner, path) {
+		t.Fatal("hash that no longer matches the file was accepted")
+	}
+}

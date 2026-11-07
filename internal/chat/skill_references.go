@@ -28,14 +28,7 @@ func (s *FileStore) PriorSkillReferenceIDs(chatID, excludeRunID string, limit in
 	}
 	// Steer lines do not carry lane/task metadata. Establish their Run's
 	// main-lane identity from query lines before inspecting any references.
-	mainRuns := map[string]bool{}
-	for _, line := range lines {
-		if stringFromAny(line["_type"]) == "query" && !lineIsSystemInitQuery(line) &&
-			strings.TrimSpace(stringFromAny(line["taskId"])) == "" && lineTaskAgentKey(line) == "" &&
-			strings.TrimSpace(stringFromAny(line["lane"])) == "" {
-			mainRuns[strings.TrimSpace(stringFromAny(line["runId"]))] = true
-		}
-	}
+	mainRuns := mainLaneRuns(lines)
 	excludeRunID = strings.TrimSpace(excludeRunID)
 	seen := map[string]bool{}
 	var ids []string
@@ -76,4 +69,18 @@ func (s *FileStore) PriorSkillReferenceIDs(chatID, excludeRunID string, limit in
 		}
 	}
 	return ids, nil
+}
+
+// mainLaneRuns returns the Runs started by a main-lane query line: not a
+// system snapshot, a task or a side lane.
+func mainLaneRuns(lines []map[string]any) map[string]bool {
+	runs := map[string]bool{}
+	for _, line := range lines {
+		if stringFromAny(line["_type"]) == "query" && !lineIsSystemInitQuery(line) &&
+			strings.TrimSpace(stringFromAny(line["taskId"])) == "" && lineTaskAgentKey(line) == "" &&
+			strings.TrimSpace(stringFromAny(line["lane"])) == "" {
+			runs[strings.TrimSpace(stringFromAny(line["runId"]))] = true
+		}
+	}
+	return runs
 }

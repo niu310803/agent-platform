@@ -56,7 +56,7 @@ Workspace 由 Agent `workspaceRoot` 决定；full_access 只把访问范围扩�
 
 ## 执行边界
 
-- 自写脚本免审仅限本 Run 经 `file_write/file_edit` 写入当前 Chat 目录、由系统解释器执行且内容未变的脚本；Workspace、公共临时目录和外来脚本不因此免审。
+- 自写脚本免审仅限本 Chat 主 lane 经 `file_write/file_edit` 写入当前 Chat 目录、由系统解释器执行且内容未变的脚本；Workspace、公共临时目录和外来脚本不因此免审。
 - 内联代码与自写脚本同等对待：系统解释器（未经包装）执行的 `python -c`、`node -e/-p`、`perl -e/-E`、`ruby -e` 字面代码，或无程序参数时从 stdin 读取的字面 heredoc/here-string，三档免执行审批。含变量、命令替换的代码，`perl -i`、`python -m` 与管道或文件提供的程序仍按未知程序审批。
 - 技能脚本与连接器 CLI 仍校验 canonical 入口及内容摘要；外围 Shell、连接器 VIEW 拦截、readonly 和 KBASE mutation gate 独立生效。
 - readonly roots 和平台私有资源保护先于 writeRoots、hostAccess 与 HITL；批准不能解除硬拒绝。
