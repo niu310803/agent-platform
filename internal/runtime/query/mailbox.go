@@ -444,12 +444,38 @@ func (s *Service) MailTarget(ctx context.Context, m mailbox.Mail) (mailbox.Targe
 			return mailbox.Target{}, mailbox.Reject(err)
 		}
 	}
-	if runs, ok := s.deps.Runs.(interface{ ChatMaintenanceActive(string) bool }); ok && runs.ChatMaintenanceActive(m.ToChatID) {
+	maintenance := false
+	if runs, ok := s.deps.Runs.(interface{ ChatMaintenanceActive(string) bool }); ok {
+		maintenance = runs.ChatMaintenanceActive(m.ToChatID)
+	}
+	if maintenance && frozen.SteerRunID == "" && !frozen.StartNow {
 		return mailbox.Target{Queue: true}, nil
 	}
 	active, ok, err := s.deps.Runs.ActiveRunForChat(m.ToChatID)
 	if err != nil {
 		return mailbox.Target{}, err
+	}
+	if frozen.SteerRunID != "" {
+		// /api/steer joins exactly the Run it names, planning or compacting
+		// included; it never waits for, or opens, another Run.
+		if !ok || active.RunID != frozen.SteerRunID {
+			return mailbox.Target{}, errSteerUnmatched
+		}
+		return mailbox.Target{RunID: active.RunID}, nil
+	}
+	if frozen.StartNow {
+		// /api/query opens a Run now; the client steers a Chat it sees running.
+		// The verdicts keep the order of ordinary query admission.
+		if maintenance {
+			return mailbox.Target{}, compactInProgressError()
+		}
+		if gate := s.AwaitingQueryGateError(m.ToChatID, summary); gate != nil {
+			return mailbox.Target{}, gate
+		}
+		if ok {
+			return mailbox.Target{}, &statusError{Status: 409, Code: activeRunConflictCode, Message: activeRunFoundMessage, Data: activeRunFoundInfo(m.ToChatID, []string{active.RunID})}
+		}
+		return mailbox.Target{StartRunID: frozen.MessageRunID}, ctx.Err()
 	}
 	if ok {
 		if frozen.ResultContract != nil {
@@ -495,13 +521,13 @@ func (s *Service) DeliverMail(ctx context.Context, m mailbox.Mail, scope control
 			if statusErr != nil {
 				return mailbox.DeliveryResult{Unknown: statusErr.OutcomeUnknown, Rejected: !statusErr.OutcomeUnknown}, statusErr
 			}
-			return mailbox.DeliveryResult{Accepted: response.Accepted, RunID: m.RunID}, nil
+			return mailbox.DeliveryResult{Accepted: response.Accepted, RunID: m.RunID, Status: response.Status, Detail: response.Detail}, nil
 		}
 		ack := s.deps.Runs.Steer(req)
 		if !ack.Accepted && ack.Status == "invalid_reference" {
-			return mailbox.DeliveryResult{Rejected: true}, runToolError("reference_unavailable", ack.Detail)
+			return mailbox.DeliveryResult{Rejected: true, Status: ack.Status, Detail: ack.Detail}, runToolError("reference_unavailable", ack.Detail)
 		}
-		return mailbox.DeliveryResult{Accepted: ack.Accepted, RunID: m.RunID}, nil
+		return mailbox.DeliveryResult{Accepted: ack.Accepted, RunID: m.RunID, Status: ack.Status, Detail: ack.Detail}, nil
 	}
 	body := s.mailbox.Body(m)
 	input, _ := json.Marshal(map[string]any{"message": body, "references": refs})
@@ -539,7 +565,8 @@ func (s *Service) DeliverMail(ctx context.Context, m mailbox.Mail, scope control
 	if err != nil {
 		var request *runtimetypes.RequestError
 		if errors.As(err, &request) && (request.Code == activeRunConflictCode || request.Code == awaitingPendingCode || request.Code == "compact_in_progress") {
-			return mailbox.DeliveryResult{}, nil
+			// Queued mail waits for the next attempt; an immediate query reports it.
+			return mailbox.DeliveryResult{}, err
 		}
 		if cmd.MessageDispatchError != nil {
 			cmd.MessageDispatchError(err)

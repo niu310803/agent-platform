@@ -758,6 +758,12 @@ func (s *Service) Completed(completion chat.RunCompletion, hop int) error {
 				s.fail(m, failure("mail_run_not_started", "the Run opened for this mail ended before reading it"))
 				continue
 			}
+			if m.Immediate {
+				// A steer belongs to the Run it named; the client decides what
+				// to do with input that Run never read.
+				s.fail(m, failure("mail_run_ended", "the Run ended before reading this message"))
+				continue
+			}
 			_, err = s.change(m.ID, func(row *Mail) error {
 				if row.Status != Inflight || row.Attempts != m.Attempts {
 					return errStale

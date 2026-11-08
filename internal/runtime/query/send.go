@@ -253,6 +253,14 @@ func (s *Service) acceptUserSend(ctx context.Context, r queryinput.SendRequest, 
 	s.sends.Lock()
 	s.sends.contexts[m.ID] = cmd
 	s.sends.Unlock()
+	if cmd.StartNow || cmd.SteerRunID != "" {
+		m.SteerID = cmd.SteerID
+		receipt, err := s.mailbox.AcceptUserNow(m, controlscope.FromContext(ctx))
+		if err != nil || receipt.MailID != m.ID {
+			s.MailReleased(m.ID)
+		}
+		return receipt, err
+	}
 	receipt, err := s.mailbox.AcceptUser(context.WithoutCancel(ctx), m, controlscope.FromContext(ctx))
 	if err != nil || receipt.MailID != m.ID {
 		s.MailReleased(m.ID)
@@ -262,6 +270,10 @@ func (s *Service) acceptUserSend(ctx context.Context, r queryinput.SendRequest, 
 	}
 	return receipt, err
 }
+
+// errSteerUnmatched answers a steer whose Run is no longer the Chat's active
+// Run, as /api/steer always did.
+var errSteerUnmatched = &contracts.RunToolError{Code: "unmatched", Message: "Run is no longer accepting steer"}
 
 // MailReleased forgets a user mail's delivery context once it can no longer
 // open or join a Run.

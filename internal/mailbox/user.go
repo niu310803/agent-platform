@@ -3,7 +3,10 @@ package mailbox
 import (
 	"agent-platform/internal/contracts/queryinput"
 	"context"
+	"errors"
+	"fmt"
 
+	"agent-platform/internal/chat"
 	"agent-platform/internal/runtime/controlscope"
 )
 
@@ -28,6 +31,77 @@ func (s *Service) AcceptUser(ctx context.Context, m Mail, scope controlscope.Sco
 		return Receipt{}, err
 	}
 	return receipt(current), nil
+}
+
+// AcceptUserNow hands an interactive query or steer to a Run while it is
+// accepted, under the per-Chat lock used by background delivery. It never
+// queues: when the Chat cannot take it now, the caller gets that verdict and
+// nothing is stored. A steer the Run then declines is kept as failed, with the
+// Run's verdict in the receipt error.
+func (s *Service) AcceptUserNow(m Mail, scope controlscope.Scope) (Receipt, error) {
+	var out Receipt
+	err := s.withDeliveryLock(m.ToChatID, func() error {
+		// Earlier mail keeps its turn; a Run it opens makes this query conflict.
+		if err := s.dispatch(m.ToChatID); err != nil {
+			s.retry(m.ToChatID, err)
+		}
+		target, err := s.port.MailTarget(s.ctx, m)
+		if err != nil {
+			return err
+		}
+		if target.Queue {
+			return failure("internal_error", "an immediate message cannot queue")
+		}
+		m.Immediate = true
+		m.Status, m.Attempts, m.IgnoredOptions = Inflight, 1, target.IgnoredOptions
+		m.RunID, m.Delivery = target.RunID, "inserted"
+		if m.RunID == "" {
+			m.RunID, m.Delivery = target.StartRunID, "started"
+			if m.RunID == "" {
+				m.RunID = chat.NewRunID()
+			}
+		}
+		if m.SteerID == "" {
+			m.SteerID = m.ID + ":1"
+		}
+		s.setScope(m.ID, scope)
+		stored, created, err := s.Store.Accept(m)
+		if !created {
+			s.dropScope(m.ID)
+			out = receipt(stored)
+			return err
+		}
+		s.changed(stored)
+		stored.Header = s.renderHeader(stored)
+		result, deliverErr := s.port.DeliverMail(s.ctx, stored, scope)
+		if deliverErr == nil && result.Accepted {
+			current, err := s.Store.Get(stored.ID)
+			out = receipt(current)
+			return err
+		}
+		if result.Unknown {
+			current, err := s.change(stored.ID, func(row *Mail) error {
+				row.ResumePhase, row.Status, row.Evidence = Inflight, Suspended, "unknown"
+				row.Error = map[string]any{"code": "delivery_unknown", "message": fmt.Sprint(deliverErr)}
+				return nil
+			})
+			out = receipt(current)
+			return errors.Join(deliverErr, err)
+		}
+		cause := deliverErr
+		if result.Status != "" {
+			cause = failure(result.Status, result.Detail)
+		} else if cause == nil {
+			cause = failure("mail_delivery_failed", "the Run did not take the message")
+		}
+		if err := s.fail(stored, cause); err != nil {
+			return errors.Join(deliverErr, err)
+		}
+		current, err := s.Store.Get(stored.ID)
+		out = receipt(current)
+		return errors.Join(deliverErr, err)
+	})
+	return out, err
 }
 func (s *Service) drain(chatID string) {
 	if err := s.withDeliveryLock(chatID, func() error { return s.dispatch(chatID) }); err != nil {

@@ -59,6 +59,7 @@
 - 保持一个 Chat 同时只有一个主 Run；"同时派很多活"靠派给分身实现。
 - 工作会话查询复用 `/api/chats` 并增加参数，不新开 `/api/chats/opened`：`agentKey` 表示所属 Agent，`openedBy` 表示发起 Agent，同时出现取交集。
 - 工作会话列表不兼容旧 `chat_start` 开出的会话，也不扫描 JSONL。
+- **原有 mode 的输入体验不变（2026-11-08 确认）。** 消息仍全部经 mailbox 中转，投递规则按入口分、不按 mode 分：`/api/send` 插入或排队；`/api/query` 只当场开 Run，会话忙时按原样返回 409，Run 状态由客户端维护（空闲 query、运行中 steer）；`/api/steer` 只插入指定 Run，回执与 `request.steer` 沿用客户端 steerId，Run 不在时 `unmatched`，不排队、不改开新 Run。WebClient 只对 BOT 用 `/api/send`；GENERAL、CODER、KBASE、TEAM、EXECUTOR 恢复原 query/steer 交互。BOT 主聊天严格排队、分身内部投递不变。
 - 补建的主要对话不算"开出"：主要对话属于 Agent 本身，不属于某次派活。
 - 分身审批时限保持 600 秒，超时按拒绝处理。
 - 归档的 Chat 退出 mail，处理方式与删除相同；恢复归档不恢复 mail，也不重投。
@@ -571,3 +572,10 @@ bot:
 - 本批明确搁置：BOT 对外派活的跨 Run 最终结果关联、进行中筛选及数量、L3、Desktop 导航和设置、语音/WebApp Query、BTW/explain、Submit/Interrupt/空白继续/计划批准的 mailbox 控制合同、内部子任务。Gateway 独立协议不改。不宣称“所有消息已统一完成”。
 - 未提交、未部署。验证结果以本轮最终报告为准；上面的“全量通过”只描述首批当时的工作区。
 - 第二批最终验证：`CGO_ENABLED=0 go test ./... -p 2`（设置 MEMX_TEST_BINARY）与 `go build ./...` 通过；BOT、外部寻址、execute 取消与 WS 终态顺序的针对性 race 检查通过，并发 BOT 首次投递连续 20 轮 race 通过。修正受理已有 Chat 时重复改写身份导致的 SQLite 锁冲突，排队阶段仅冻结消息，实际开 Run 时更新 Chat。WebClient 的 515 套、4578 项测试及生产构建通过；只补齐既有 ConnectorPicker 测试的 transport mock，连接器 hook 的原有未提交实现保留。
+
+### 原有 mode 输入体验恢复实施记录（2026-11-08）
+
+- Platform：交互式 `/api/query`（HTTP/WS，含 Desktop 与渠道）和正文/引用 `/api/steer` 经 `mailbox.AcceptUserNow` 当场投递，MAILS 新增 `IMMEDIATE_`。判定不进 FIFO：先让队列中较早的信投递，再按普通 query 准入顺序给出压缩中、未决等待项或活动 Run 的原 409，拒绝不写 MAILS；steer 只插入指定活动 Run（含规划、压缩与 Proxy/渠道），沿用客户端 steerId，Run 不再活动或拒收时返回 Run 的结论，未读即结束记为失败，不重投。`/api/send`、Automation、execute 不变。
+- WebClient：入口判定集中到 `features/composer/lib/messageEntry.ts`，只有 BOT（且非 gateway）走 `/api/send`；其他 mode 恢复空闲 query、运行中本地待发送区与 steer、等待项期间禁止发送。`request.steer` 一律按 steer 样式与 steerId 建节点，实时与回放一致。
+- 测试：恢复 `TestCoderPlanningSteerReplacesProposal` 与渠道 steer 用例的 HTTP/上游转发断言；恢复改用 send 前的 steer 生命周期用例，另补 BOT 与各 mode 的入口用例。
+- 未提交、未部署。

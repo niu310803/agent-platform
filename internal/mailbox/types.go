@@ -88,7 +88,10 @@ type Mail struct {
 	AwaitingSource   string                        `json:"awaitingSource,omitempty"`
 	// ParentID retains the originating letter for asks and notifications even
 	// after a delivery attempt has moved to another Run.
-	ParentID    string         `json:"parentId,omitempty"`
+	ParentID string `json:"parentId,omitempty"`
+	// Immediate mail is an interactive query or steer. It reaches a Run when it
+	// is accepted or fails; it is never queued, retried or moved to another Run.
+	Immediate   bool           `json:"-"`
 	Delivery    string         `json:"delivery,omitempty"`
 	RunID       string         `json:"runId,omitempty"`
 	SteerID     string         `json:"steerId,omitempty"`
@@ -136,6 +139,10 @@ type DeliveryResult struct {
 	Rejected bool
 	Unknown  bool
 	RunID    string
+	// Status and Detail carry the Run's verdict when it did not take an
+	// inserted message, as /api/steer reports it.
+	Status string
+	Detail string
 }
 
 // Port is implemented by Runtime. Accept must commit persist while holding the

@@ -177,15 +177,17 @@ func TestCoderPlanningSteerReplacesProposal(t *testing.T) {
 					}
 					payload["references"] = []api.Reference{{URL: "steer.png"}}
 				}
-				// Exercise the planning engine's internal revision protocol. Public text
-				// input now enters mailbox and waits behind a planning Run.
-				var request api.SteerRequest
-				if err := json.Unmarshal(mustJSONMarshal(t, payload), &request); err != nil {
+				// /api/steer passes through mailbox and still revises the planning Run.
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodPost, "/api/steer", bytes.NewReader(mustJSONMarshal(t, payload)))
+				req.Header.Set("Content-Type", "application/json")
+				fixture.server.ServeHTTP(rec, req)
+				var result api.ApiResponse[api.SteerResponse]
+				if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 					t.Fatal(err)
 				}
-				result, err := testQueryService(fixture.server).Steer(t.Context(), runtimeSteerCommand(request))
-				if err != nil || !result.Accepted {
-					t.Fatalf("kernel steer: %+v %v", result, err)
+				if rec.Code != 200 || !result.Data.Accepted {
+					t.Fatalf("steer: %s", rec.Body.String())
 				}
 				if scenario.image {
 					_ = os.Remove(filepath.Join(fixture.chats.ChatDir(chatID), "steer.png"))

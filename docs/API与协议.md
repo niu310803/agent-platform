@@ -601,7 +601,7 @@ TEAM 总控的普通工具与 reasoning 沿普通 Agent 事件链路；内部 `a
 
 `planningMode`、`editingMode` 与 `detail` 在受理时解析并冻结；`model` 只冻结请求显式给出的值，省略时开 Run 按 Agent 配置解析，与 `/api/query` 相同。这些选项只在新 Run 生效：插入时请求中与当前 Run 不同的 `planningMode/editingMode/model` 出现在 `ignoredOptions`；`accessLevel` 不改变当前 Run，调整仍用 `/api/access-level`。同一 subject 和 `requestId` 只产生一条 mail；重复请求返回相同 mail 的投递收据，不同内容返回 HTTP 409 `idempotency_conflict`。参数、Agent、归属、引用或选项校验失败直接拒绝。
 
-消费后的 `request.query/request.steer` 携带相同 `requestId/mailId` 和 `mailOrigin:user`；这些 mail 字段只在实时事件中，JSONL 只保存 `requestId`。`mail.updated` 包含 `requestId/ignoredOptions`，只推送给该 mail 所属 subject 的主连接。没有公开的撤销发送或删除服务端消息接口。原 `/api/query`、正文或引用 `/api/steer`、Desktop 普通输入、Automation 和渠道入口保持外部协议，Runtime 门面统一先投 mailbox；忙时按收件 Chat 规则插入或排队。`/api/execute` 忙时排队，调用方断开则撤回未投递的信或中断已开出的 Run。BOT 不接受 execute。
+消费后的 `request.query/request.steer` 携带相同 `requestId/mailId` 和 `mailOrigin:user`；这些 mail 字段只在实时事件中，JSONL 只保存 `requestId`。`mail.updated` 包含 `requestId/ignoredOptions`，只推送给该 mail 所属 subject 的主连接。没有公开的撤销发送或删除服务端消息接口。`/api/query`、正文或引用 `/api/steer` 及使用它们的 Desktop 普通输入和渠道入口保持协议与语义，Runtime 门面写入 mailbox 后当场投递：query 只开新 Run，忙时返回原 409（`compact_in_progress`、`awaiting_pending`、`active_run_conflict`），拒绝时不写 MAILS；steer 只插入指定的活动 Run（含规划、压缩中的 Run），回执和 `request.steer` 沿用调用方 steerId，该 Run 已不活动时返回 `accepted:false`、`status:unmatched`，不排队、不开新 Run。Automation 经同一门面，按收件 Chat 规则插入或排队。`/api/execute` 忙时排队，调用方断开则撤回未投递的信或中断已开出的 Run。BOT 不接受 execute。
 
 BOT 首次发送不传 chatId，由 `/api/send` 原子创建主聊天；首次上传文件可带已有的 upload 暂存 ChatID 并将它设为主聊天。若上传期间已有别的请求创建主聊天，返回 `409 bot_main_changed`，保留暂存文件供用户重试。BOT 不允许通过主要聊天指针接口提升已有分身（`bot_primary_fixed`）；清空主指针后下一次 send 新建主聊天。外部 Agent 只能寻址 BOT 主聊天，不能创建或读取其分身。
 
@@ -1394,7 +1394,7 @@ Agent 通过 chat_send 给已有 Chat 补充信件；在跑时由 Mailbox 插入
 
 ### planning 期间的内部 steer
 
-以下描述执行器内部的计划修订能力。公开主 lane 正文/引用输入已经转为 mailbox，在规划 Run 存在时排队，不再直接触发本节的修订协议；Submit 作答和空白继续保持既有入口。
+公开 `/api/steer` 经 mailbox 当场插入规划 Run，触发本节的修订协议；`/api/send` 与 Agent 信件在规划 Run 存在时排队，不触发修订。Submit 作答和空白继续保持既有入口。
 
 活动原生 planning Run（GENERAL/CODER/KBASE）的一轮规划结束不会关闭 Run 的 steer 队列。生成候选计划期间入队的 steer 会在当前模型调用结束后使该计划失效，并在同一 Run 中生成新 revision；等待确认期间收到 steer 也会立即使旧确认失效并唤醒规划。旧计划失效统一发布 `planning.superseded`，字段为 `planningId`、`planningFile`、`awaitingId`、`reason:"steer"`；客户端应将该计划标为已失效，不再允许执行。已有确认框还会收到 `awaiting.answer(status:"error", error.code:"planning_superseded")`，没有确认框时不会补造 `awaiting.ask` 或 `request.submit`。
 

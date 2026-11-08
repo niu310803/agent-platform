@@ -94,3 +94,76 @@ func TestCancelQueuedLetterCannotWithdrawDeliveredRun(t *testing.T) {
 		t.Fatalf("delivered letter mislabeled: %+v %v", got, err)
 	}
 }
+
+func immediateSample(id string) Mail {
+	m := sample(id, Letter, Queued)
+	m.OriginType, m.RequestID, m.Hop = "user", "request-"+id, 0
+	m.FromAgentKey, m.FromChatID, m.FromRunID, m.FromToolID = "", "", "", ""
+	return m
+}
+
+func TestImmediateVerdictStoresNothingAndSkipsQueue(t *testing.T) {
+	s, p := testBox(t)
+	p.targetErr = failure("active_run_conflict", "active run found for chat")
+	m := immediateSample("now-conflict")
+	if _, err := s.AcceptUserNow(m, controlscope.Scope{Subject: m.Subject}); err == nil || err.Error() != "active run found for chat" {
+		t.Fatalf("verdict: %v", err)
+	}
+	if _, err := s.Store.Get(m.ID); err != ErrNotFound {
+		t.Fatalf("rejected immediate message was stored: %v", err)
+	}
+	// A queued letter ahead must not hold an immediate steer behind it.
+	p.targetErr = nil
+	p.target = Target{Queue: true}
+	queued := immediateSample("ahead")
+	if _, err := s.AcceptUser(t.Context(), queued, controlscope.Scope{Subject: queued.Subject}); err != nil {
+		t.Fatal(err)
+	}
+	p.target = Target{RunID: "target-run"}
+	p.callback = func(m Mail) (DeliveryResult, error) {
+		if m.ID == queued.ID {
+			return DeliveryResult{Accepted: false}, nil
+		}
+		return DeliveryResult{Accepted: true, RunID: m.RunID}, nil
+	}
+	steer := immediateSample("steer")
+	steer.SteerID = "client-steer"
+	got, err := s.AcceptUserNow(steer, controlscope.Scope{Subject: steer.Subject})
+	if err != nil || got.Delivery != "inserted" || got.RunID != "target-run" || got.Status != Inflight {
+		t.Fatalf("immediate steer: %+v %v", got, err)
+	}
+	saved, _ := s.Store.Get(steer.ID)
+	if !saved.Immediate || saved.SteerID != "client-steer" || saved.Attempts != 1 {
+		t.Fatalf("steer identity: %+v", saved)
+	}
+}
+
+func TestImmediateSteerFailsWithRunVerdictAndIsNeverRequeued(t *testing.T) {
+	s, p := testBox(t)
+	p.callback = func(Mail) (DeliveryResult, error) {
+		return DeliveryResult{Accepted: false, Status: "unmatched", Detail: "Run is no longer accepting steer"}, nil
+	}
+	declined := immediateSample("declined")
+	got, err := s.AcceptUserNow(declined, controlscope.Scope{Subject: declined.Subject})
+	if err != nil || got.Status != Failed || got.Error["code"] != "unmatched" {
+		t.Fatalf("declined steer: %+v %v", got, err)
+	}
+	p.callback = nil
+	unread := immediateSample("unread")
+	if _, err := s.AcceptUserNow(unread, controlscope.Scope{Subject: unread.Subject}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Completed(chat.RunCompletion{RunID: "target-run", ChatID: unread.ToChatID, AgentKey: unread.ToAgentKey, FinishReason: "cancel"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	saved, _ := s.Store.Get(unread.ID)
+	if saved.Status != Failed || saved.Error["code"] != "mail_run_ended" {
+		t.Fatalf("unread steer was not settled: %+v", saved)
+	}
+	p.mu.Lock()
+	deliveries := len(p.deliveries)
+	p.mu.Unlock()
+	if deliveries != 2 {
+		t.Fatalf("immediate mail was redelivered: %d deliveries", deliveries)
+	}
+}

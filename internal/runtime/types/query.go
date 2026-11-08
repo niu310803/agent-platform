@@ -38,8 +38,15 @@ type QueryCommand struct {
 	Detached             bool                            `json:"-"`
 	MessageRunID         string                          `json:"-"`
 	MailboxAcceptance    bool                            `json:"-"`
-	ModelMessage         string                          `json:"-"`
-	Mail                 *queryinput.MailInput           `json:"-"`
+	// StartNow keeps the /api/query contract through Mailbox: the message opens
+	// a Run now or the caller gets the conflict; the client steers a busy Chat.
+	// SteerRunID does the same for /api/steer: the message joins that Run now,
+	// under SteerID, or is unmatched. Other messages may insert or queue.
+	StartNow     bool                  `json:"-"`
+	SteerRunID   string                `json:"-"`
+	SteerID      string                `json:"-"`
+	ModelMessage string                `json:"-"`
+	Mail         *queryinput.MailInput `json:"-"`
 	// OriginalQuery is the immutable incoming JSON, separate from resolved inputs.
 	OriginalQuery json.RawMessage `json:"-"`
 

@@ -342,6 +342,17 @@ func applyDesktopImageStudioRunLimits(req runtimetypes.QueryCommand, session *co
 	session.RunLimits.FinalAnswerPrompt = "The Image Studio task has reached its only permitted tool round. Do not call any tool again; report the existing tool result accurately."
 }
 
+func compactInProgressError() *statusError {
+	return &statusError{
+		Status:  409,
+		Code:    "compact_in_progress",
+		Message: "context compaction is in progress",
+		Data: map[string]any{"error": map[string]any{
+			"code": "compact_in_progress", "message": "context compaction is in progress", "retryable": true,
+		}},
+	}
+}
+
 func (s *Service) PrepareQueryAdmissionRequest(
 	ctx context.Context,
 	req runtimetypes.QueryCommand,
@@ -385,14 +396,7 @@ func (s *Service) PrepareQueryAdmissionRequest(
 		if reserveErr != nil {
 			var maintenanceErr *contracts.ChatMaintenanceConflictError
 			if errors.As(reserveErr, &maintenanceErr) {
-				return queryAdmission{}, &statusError{
-					Status:  409,
-					Code:    "compact_in_progress",
-					Message: "context compaction is in progress",
-					Data: map[string]any{"error": map[string]any{
-						"code": "compact_in_progress", "message": "context compaction is in progress", "retryable": true,
-					}},
-				}
+				return queryAdmission{}, compactInProgressError()
 			}
 			return queryAdmission{}, reserveErr
 		}

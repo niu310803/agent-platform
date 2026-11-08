@@ -25,7 +25,7 @@ const schema = `CREATE TABLE MAILS (
  HOP_ INTEGER NOT NULL, ACCESS_LEVEL_ TEXT NOT NULL DEFAULT '', ACCESS_GRANT_ TEXT, MODEL_ TEXT, REQUEST_DIGEST_ TEXT NOT NULL DEFAULT '',
  ANSWERED_BY_MAIL_ID_ TEXT NOT NULL DEFAULT '', REPLY_KEY_ TEXT NOT NULL DEFAULT '', REPLY_OF_RUN_ID_ TEXT NOT NULL DEFAULT '',
  OUTCOME_ TEXT NOT NULL DEFAULT '', AWAITING_ID_ TEXT NOT NULL DEFAULT '', AWAITING_MODE_ TEXT NOT NULL DEFAULT '',
- AWAITING_SOURCE_ TEXT NOT NULL DEFAULT '', PARENT_MAIL_ID_ TEXT NOT NULL DEFAULT '',
+ AWAITING_SOURCE_ TEXT NOT NULL DEFAULT '', PARENT_MAIL_ID_ TEXT NOT NULL DEFAULT '', IMMEDIATE_ INTEGER NOT NULL DEFAULT 0,
  DELIVERY_ TEXT NOT NULL DEFAULT '', RUN_ID_ TEXT NOT NULL DEFAULT '', STEER_ID_ TEXT NOT NULL DEFAULT '',
  ATTEMPTS_ INTEGER NOT NULL DEFAULT 0, CONSUMED_AT_ INTEGER NOT NULL DEFAULT 0,
  RESUME_PHASE_ TEXT NOT NULL DEFAULT '', EVIDENCE_ TEXT NOT NULL DEFAULT '', ERROR_ TEXT,
@@ -45,7 +45,7 @@ CREATE INDEX IDX_MAILS_TERMINAL_ ON MAILS(TERMINAL_AT_,BODY_PURGED_AT_);`
 const columns = `MAIL_ID_,REQUEST_ID_,PLANNING_MODE_,EDITING_MODE_,IGNORED_OPTIONS_,KIND_,STATUS_,CREATED_AT_,UPDATED_AT_,TO_AGENT_KEY_,TO_CHAT_ID_,OPENED_CHAT_,NEW_CHAT_,
 ORIGIN_TYPE_,FROM_AGENT_KEY_,FROM_CHAT_ID_,FROM_RUN_ID_,FROM_TOOL_ID_,SUBJECT_,
 INPUT_,MESSAGE_,REFERENCES_,FILES_,BODY_PURGED_AT_,HOP_,ACCESS_LEVEL_,ACCESS_GRANT_,MODEL_,REQUEST_DIGEST_,
-ANSWERED_BY_MAIL_ID_,REPLY_KEY_,REPLY_OF_RUN_ID_,OUTCOME_,AWAITING_ID_,AWAITING_MODE_,AWAITING_SOURCE_,PARENT_MAIL_ID_,
+ANSWERED_BY_MAIL_ID_,REPLY_KEY_,REPLY_OF_RUN_ID_,OUTCOME_,AWAITING_ID_,AWAITING_MODE_,AWAITING_SOURCE_,PARENT_MAIL_ID_,IMMEDIATE_,
 DELIVERY_,RUN_ID_,STEER_ID_,ATTEMPTS_,CONSUMED_AT_,RESUME_PHASE_,EVIDENCE_,ERROR_,TERMINAL_AT_,FROM_CHAT_CLOSED_AT_,TO_CHAT_CLOSED_AT_`
 
 var ErrNotFound = errors.New("mail_not_found")
@@ -101,7 +101,7 @@ func values(m Mail) []any {
 	return []any{m.ID, m.RequestID, jsonText(m.PlanningMode), jsonText(m.EditingMode), jsonText(m.IgnoredOptions), m.Kind, m.Status, m.CreatedAt, m.UpdatedAt, m.ToAgentKey, m.ToChatID, m.OpenedChat, m.NewChat,
 		m.OriginType, m.FromAgentKey, m.FromChatID, m.FromRunID, m.FromToolID, m.Subject,
 		string(m.Input), m.Message, jsonText(m.References), jsonText(m.Files), m.PurgedAt, m.Hop, m.AccessLevel, jsonText(m.AccessGrant), jsonText(m.Model), m.RequestDigest,
-		m.AnsweredBy, m.ReplyKey, m.ReplyOfRun, m.Outcome, m.AwaitingID, m.AwaitingMode, m.AwaitingSource, m.ParentID,
+		m.AnsweredBy, m.ReplyKey, m.ReplyOfRun, m.Outcome, m.AwaitingID, m.AwaitingMode, m.AwaitingSource, m.ParentID, m.Immediate,
 		m.Delivery, m.RunID, m.SteerID, m.Attempts, m.ConsumedAt, m.ResumePhase, m.Evidence, jsonText(m.Error), m.TerminalAt, m.FromChatClosedAt, m.ToChatClosedAt}
 }
 
@@ -113,7 +113,7 @@ func scan(row scanner) (Mail, error) {
 	err := row.Scan(&m.ID, &m.RequestID, &planning, &editing, &ignored, &m.Kind, &m.Status, &m.CreatedAt, &m.UpdatedAt, &m.ToAgentKey, &m.ToChatID, &m.OpenedChat, &m.NewChat,
 		&m.OriginType, &m.FromAgentKey, &m.FromChatID, &m.FromRunID, &m.FromToolID, &m.Subject,
 		&input, &m.Message, &refs, &files, &m.PurgedAt, &m.Hop, &m.AccessLevel, &grant, &model, &m.RequestDigest,
-		&m.AnsweredBy, &m.ReplyKey, &m.ReplyOfRun, &m.Outcome, &m.AwaitingID, &m.AwaitingMode, &m.AwaitingSource, &m.ParentID,
+		&m.AnsweredBy, &m.ReplyKey, &m.ReplyOfRun, &m.Outcome, &m.AwaitingID, &m.AwaitingMode, &m.AwaitingSource, &m.ParentID, &m.Immediate,
 		&m.Delivery, &m.RunID, &m.SteerID, &m.Attempts, &m.ConsumedAt, &m.ResumePhase, &m.Evidence, &errData, &m.TerminalAt, &m.FromChatClosedAt, &m.ToChatClosedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return m, ErrNotFound

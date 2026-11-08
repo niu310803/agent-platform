@@ -48,5 +48,7 @@ func trustedQueryCommand(ctx context.Context, req api.QueryRequest) runtimetypes
 		cmd.Caller = runtimetypes.Caller{Subject: cmd.Identity.Subject, DeviceID: cmd.Identity.DeviceID, Scope: cmd.Identity.Scope}
 	}
 	_, cmd.TrustedGateway = ws.GatewayFromContext(ctx)
+	// /api/query starts a Run or reports the conflict; it never queues.
+	cmd.StartNow = true
 	return cmd
 }

@@ -2,7 +2,9 @@ package query
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -217,22 +219,34 @@ func (s *Service) MessageSteer(ctx context.Context, cmd runtimetypes.SteerComman
 	if cmd.ChatID != "" && cmd.ChatID != status.ChatID {
 		return runtimetypes.SteerResult{}, &statusError{Status: 400, Message: "chatId does not match run"}
 	}
+	steerID := strings.TrimSpace(cmd.SteerID)
+	if steerID == "" {
+		steerID = chat.NewRunID()
+	}
 	id := cmd.RequestID
 	if id == "" {
-		id = cmd.SteerID
+		id = steerID
 	}
-	if id == "" {
-		id = chat.NewRunID()
+	// The steer passes through Mailbox under the caller's steer identity and
+	// joins only this Run; the Run's verdict is returned as /api/steer did.
+	receipt, err := s.Send(ctx, queryinput.SendRequest{RequestID: id, ChatID: status.ChatID, AgentKey: status.AgentKey, Message: cmd.Message, References: cmd.References}, runtimetypes.QueryCommand{Caller: runtimetypes.Caller{Subject: controlscope.FromContext(ctx).Subject}, SteerRunID: cmd.RunID, SteerID: steerID})
+	unmatched := runtimetypes.SteerResult{Accepted: false, Status: "unmatched", RunID: cmd.RunID, SteerID: steerID, Detail: errSteerUnmatched.Message}
+	if errors.Is(err, errSteerUnmatched) {
+		return unmatched, nil
 	}
-	receipt, err := s.Send(ctx, queryinput.SendRequest{RequestID: id, ChatID: status.ChatID, AgentKey: status.AgentKey, Message: cmd.Message, References: cmd.References}, runtimetypes.QueryCommand{Caller: runtimetypes.Caller{Subject: controlscope.FromContext(ctx).Subject}})
+	var request *statusError
+	if errors.As(err, &request) && (request.Code == "invalid_reference" || request.Code == "interaction_disabled") {
+		return runtimetypes.SteerResult{Accepted: false, Status: request.Code, RunID: cmd.RunID, SteerID: steerID, Detail: request.Message}, nil
+	}
 	if err != nil {
 		return runtimetypes.SteerResult{}, err
 	}
-	ackStatus := "accepted"
-	if receipt.Delivery == "queued" {
-		ackStatus = "queued"
+	if receipt.Status == mailbox.Failed {
+		code, _ := receipt.Error["code"].(string)
+		message, _ := receipt.Error["message"].(string)
+		return runtimetypes.SteerResult{Accepted: false, Status: code, RunID: cmd.RunID, SteerID: steerID, Detail: message}, nil
 	}
-	return runtimetypes.SteerResult{Accepted: true, Status: ackStatus, RunID: receipt.RunID, SteerID: receipt.MailID}, nil
+	return runtimetypes.SteerResult{Accepted: true, Status: "accepted", RunID: cmd.RunID, SteerID: steerID, Detail: "Steer accepted"}, nil
 }
 
 type messageDelivery struct {

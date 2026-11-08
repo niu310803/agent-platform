@@ -25,7 +25,7 @@ mail 都寄给 Chat，不寄给 Run；寄给 Agent 就是寄给它的主要对�
 
 `GET /api/mails` 的 `box` 默认 pending，非法值拒绝；`box` 与 `status` 取交集，列表和 total 使用同一过滤。WebClient 角标为待收取总数。垃圾箱只读，不提供清空和永久删除；正文照常按保留期清理。用户 mail 只有收件 Chat，关闭该 Chat 后按无发件端记录清理。
 
-WebClient 普通主聊天文本统一发送，待发消息按身份隔离保存到本地。消费事件出现时按 requestId 替换为正式用户消息；刷新从 pending 恢复，启动清库导致 mail 不存在时显示“未送达”，可用新 requestId 重发或只删除本地消息。公开 `/api/query`（含带专用参数）与正文非空或带引用的主 lane `/api/steer` 保留协议，在 Runtime 门面转换为 mailbox 投递；Desktop 普通输入、渠道输入及 Automation 同样经过此门面。Automation 保留 `origin:automation`，不生成 Agent 信封、回信或派生控制权，省略档位仍为 ask_for_approval。运行中卡在 HITL 的输入仍可发送，但作答必须提交等待项。
+WebClient 只在 BOT 聊天经 `/api/send` 发送普通文本，待发消息按身份隔离保存到本地。消费事件出现时按 requestId 替换为正式用户消息；刷新从 pending 恢复，启动清库导致 mail 不存在时显示“未送达”，可用新 requestId 重发或只删除本地消息。其他 mode 仍由客户端按 Run 状态选择 `/api/query` 或 `/api/steer`。公开 `/api/query`（含带专用参数）与正文非空或带引用的主 lane `/api/steer` 保留协议与语义，在 Runtime 门面写入 mailbox 并当场投递（MAILS 标记 `IMMEDIATE_`）：query 只开新 Run，会话忙、压缩中或有未决等待项时返回原来的 409，拒绝时不写 MAILS；steer 只插入请求指定的活动 Run（规划、压缩中的 Run 也插入），回执与 `request.steer` 沿用调用方 steerId，该 Run 已不活动时返回 `unmatched`，Run 未读就结束的 steer 记为失败。二者都不排队、不重投、不改投其他 Run，也不排在 FIFO 队列之后；队列中较早的信仍先投。Desktop 普通输入与渠道输入使用这两个入口，规则相同；Automation 经同一门面，但按收件 Chat 规则插入或排队。Automation 保留 `origin:automation`，不生成 Agent 信封、回信或派生控制权，省略档位仍为 ask_for_approval。运行中卡在 HITL 的输入仍可发送，但作答必须提交等待项。
 
 `/api/execute` 受理为用户 letter，忙时排队，独占其实际开出的 Run，不插入已有 Run。调用方断开时，在投递锁内撤回尚未投递的消息；若已经开 Run，则只中断该消息开出的 Run。BOT 一律不能作为 execute 目标。
 

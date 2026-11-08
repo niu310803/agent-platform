@@ -47,7 +47,7 @@ cmd/agent-platform/main.go
 - `internal/runtime` 负责 Query 准入、Session、Run 状态、执行、恢复和子任务编排，不得依赖 Server。App 直接组装各组件；`adapter` 只转换旧执行器/catalog DTO。受管根 Proxy 驱动归 `proxy.Driver`，公共收尾与 recorder/usage 归 `runexec`；Server 经 ProxyPort 保留路由、响应、channel 与控制适配，不能宣称 ProxyPort 已移除。
 - `internal/server` 只做 HTTP/WS 解码、鉴权、响应映射、SSE flush 和薄适配，不得直接依赖 llm、tools 或具体 Agent mode。
 - `internal/runops` 负责 Chat 会话工具、所有权、幂等及旧工具的一层调用限制，直接依赖 Runtime 窄接口；`internal/automation` 负责注册、调度与执行记录。自动化初始权限来自 `query.accessLevel`，省略为 ask_for_approval，不继承 Chat 历史权限。 `internal/automation.Service` 共用于 HTTP 和 Task Control 的独立 Automation 工具，版本校验、审批及调用收据见 [自动化](docs/自动化.md#task-control-管理工具)。
-- `internal/mailbox` 始终启用，保存独立 mail.db；并库前每次启动删除库及 sidecar 后新建，旧邮件不恢复（TODO(chats-db-v2)）。用户消息经 HTTP/主 WS `/api/send` 与 Agent 信件共用 letter/reply/notify/ask，三箱按状态过滤、角标取待收取总数；用户消息不生成信封、回信或派生控制限制，运行选项只在开新 Run 生效。负责冻结权限、回信幂等、附件、运行期人工重投与 30 天正文清理。删除和归档都关闭 mail，恢复归档不恢复。信封头投递时保存 JSONL mailHeader，模型历史不回查库。只有 letter started 授予发信方 Run 控制；请示代批按上级当前档位重评，人工用户可经 /api/submit 作答，硬禁止和只读不放宽。工作列表以 NEW_CHAT_ 按 openedBy/subject 筛选，普通历史归属不依赖 mail。详见 [Mailbox](docs/Mailbox.md)。
+- `internal/mailbox` 始终启用，保存独立 mail.db；并库前每次启动删除库及 sidecar 后新建，旧邮件不恢复（TODO(chats-db-v2)）。用户消息经 HTTP/主 WS `/api/send` 与 Agent 信件共用 letter/reply/notify/ask，三箱按状态过滤、角标取待收取总数；`/api/query` 与正文/引用 `/api/steer` 也写 mail 但当场投递、保留原语义：query 只开新 Run，忙时返回原 409；steer 只插入指定活动 Run（含规划）并沿用调用方 steerId，否则 unmatched；二者都不排队、不改投其他 Run；用户侧只有 `/api/send`、Automation 与 execute 按收件 Chat 规则插入或排队；用户消息不生成信封、回信或派生控制限制，运行选项只在开新 Run 生效。负责冻结权限、回信幂等、附件、运行期人工重投与 30 天正文清理。删除和归档都关闭 mail，恢复归档不恢复。信封头投递时保存 JSONL mailHeader，模型历史不回查库。只有 letter started 授予发信方 Run 控制；请示代批按上级当前档位重评，人工用户可经 /api/submit 作答，硬禁止和只读不放宽。工作列表以 NEW_CHAT_ 按 openedBy/subject 筛选，普通历史归属不依赖 mail。详见 [Mailbox](docs/Mailbox.md)。
 - `internal/llm` 负责 prompt、模型流、HITL、planning 与工具循环；`internal/modelclient` 承接 Provider HTTP、首响应超时和错误分类；`internal/tools` 是通用工具 registry/router，mode 工具通过 named handler 接入，不增加 mode switch。
 - `internal/conversation`、`adminsource`、`chatresource` 分别负责会话/归档编排、源码 mutation 事务、Chat 资源解析和 mutation；Chat 资源沿用 principal/Chat 权限，不借用连接器授权。`internal/chat` 保存会话与回放数据。会话投影与导出装配归 `conversationexport`，导出入口独立构建并一次编码，不向 Snapshot DTO 保存临时构建状态；`chatresource` 负责每次导出的单次 manifest 读取、文件打开和产物完整性校验，MIME 采样统一复用 `documentmeta`；普通会话读取不编码 JSON 或读取资源文件。
 - `internal/connector` 校验、导入和编辑中立连接器包；`connectorauth` 负责部署级授权与 CLI 准备；`connectorops` 提供调用方中立的 CLI/MCP 执行与短期授权，不持有 WebApp、appId、Chat 或页面生命周期，不注册业务 operation/profile。旧包/凭据/MCP 目录迁移和 connector-migrate 命令已移除，`connectormigrate` 仅保留独立 Desktop 工具声明调整。包、挂载与凭据边界见 [连接器](docs/连接器.md)、[安装与授权](docs/连接器安装与授权.md) 和 [执行协议](docs/连接器执行协议.md)。
@@ -116,7 +116,7 @@ KBX 索引固定使用 `ru-kbases/<libraryId>/index.sqlite` 及配套存储；Ag
 
 ## 6. API 定义
 
-非 SSE JSON 统一使用 `{code,msg,data}` 包裹，成功 `code:0`。普通用户消息入口为 HTTP/主 WS `/api/send`，返回收据，事件沿用推送与 attach；专用 Query 入口继续保留。HTTP/WS 参数、路由、流事件与错误语义统一查阅 [API 与协议](docs/API与协议.md)；人工交互查阅 [HITL 协议](docs/HITL协议.md)。不要在此重复维护接口清单。
+非 SSE JSON 统一使用 `{code,msg,data}` 包裹，成功 `code:0`。BOT 聊天的用户消息入口为 HTTP/主 WS `/api/send`，返回收据，事件沿用推送与 attach；其他 mode 由客户端按自己看到的 Run 状态，空闲用 `/api/query`、运行中用 `/api/steer`，体验与改用 mailbox 前一致。HTTP/WS 参数、路由、流事件与错误语义统一查阅 [API 与协议](docs/API与协议.md)；人工交互查阅 [HITL 协议](docs/HITL协议.md)。不要在此重复维护接口清单。
 
 ## 7. 开发要点
 
