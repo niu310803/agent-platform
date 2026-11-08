@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	agentcontract "agent-platform/internal/agent"
+	"agent-platform/internal/agent/bot"
 	"agent-platform/internal/agent/coder"
 	"agent-platform/internal/agent/executor"
 	"agent-platform/internal/agent/general"
@@ -124,6 +125,9 @@ func ApplyCoderCreateDefaults(definition map[string]any, defaults CoderCreateDef
 }
 func ApplyGeneralCreateDefaults(definition map[string]any, defaults GeneralCreateDefaults) map[string]any {
 	return general.ApplyCreateDefaults(definition, defaults)
+}
+func ApplyBotCreateDefaults(definition map[string]any) map[string]any {
+	return bot.ApplyCreateDefaults(definition)
 }
 func ApplyKBaseCreateDefaults(definition map[string]any, defaults KBaseCreateDefaults) map[string]any {
 	return kbase.ApplyCreateDefaults(definition, defaults)

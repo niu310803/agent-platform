@@ -32,6 +32,8 @@ func TestAuthorizedChatFilesAreHostReadOnlyAndCanonical(t *testing.T) {
 		{"peer/report.pdf", WriteAccess, false}, {"foreign/report.pdf", ReadAccess, false},
 		{"peer.jsonl", ReadAccess, false}, {"mail.db", ReadAccess, false}, {"peer/.btw/run/file", ReadAccess, false},
 		{"peer/.explain/run/file", ReadAccess, false}, {"peer/escape/secret", ReadAccess, false},
+		// Case variants name the same side lane on case-insensitive volumes.
+		{"peer/.BTW/run/file", ReadAccess, false}, {"peer/.Explain/run/file", ReadAccess, false}, {"peer.JSONL", ReadAccess, false},
 	} {
 		plan, err := BuildPathPlan(config.AccessPolicyConfig{}, session, tc.mode, filepath.Join(chats, tc.path))
 		if err != nil || plan.Allowed() != tc.allow {
@@ -41,6 +43,14 @@ func TestAuthorizedChatFilesAreHostReadOnlyAndCanonical(t *testing.T) {
 	recursive := BuildSubtreePlan(config.AccessPolicyConfig{}, session, ReadAccess, filepath.Join(chats, "peer"))
 	if !recursive.Blocked() {
 		t.Fatalf("recursive peer read included side lanes: %+v", recursive)
+	}
+	// Side lanes block a walk only where the ordinary policy would not allow
+	// them; full_access could already read them before the Chat file grant.
+	full := session
+	full.AccessLevel = contracts.AccessLevelFullAccess
+	fullCfg := config.AccessPolicyConfig{Levels: map[string]config.AccessPolicyLevelConfig{contracts.AccessLevelFullAccess: {ReadRoots: []string{"@root"}}}}
+	if recursive := BuildSubtreePlan(fullCfg, full, ReadAccess, filepath.Join(chats, "peer")); !recursive.Allowed() {
+		t.Fatalf("full_access recursive peer read regressed: %+v", recursive)
 	}
 	session.AgentHasRuntimeSandbox = true
 	plan, err := BuildPathPlan(config.AccessPolicyConfig{}, session, ReadAccess, filepath.Join(chats, "peer/report.pdf"))

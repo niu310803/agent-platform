@@ -168,10 +168,12 @@ func BuildPathPlan(cfg config.AccessPolicyConfig, session QuerySession, mode Acc
 			rel, err := filepath.Rel(roots.Chats.Host, realCandidate.Host)
 			if err == nil {
 				parts := strings.Split(filepath.ToSlash(rel), "/")
-				// A directory grant cannot include sibling JSONL or side lanes.
-				allowed := len(parts) > 0 && parts[0] != "" && parts[0] != "." && parts[0] != ".." && !strings.HasSuffix(parts[0], ".jsonl")
+				// A directory grant cannot include sibling JSONL or side lanes. Names
+				// compare without case: Host paths keep the caller's spelling, and
+				// case-insensitive volumes resolve .BTW to the .btw side lane.
+				allowed := len(parts) > 0 && parts[0] != "" && parts[0] != "." && parts[0] != ".." && !strings.HasSuffix(strings.ToLower(parts[0]), ".jsonl")
 				for _, part := range parts[1:] {
-					if part == ".btw" || part == ".explain" {
+					if strings.EqualFold(part, ".btw") || strings.EqualFold(part, ".explain") {
 						allowed = false
 					}
 				}

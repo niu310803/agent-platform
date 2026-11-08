@@ -126,7 +126,7 @@ BOT 不允许把已有分身提升为主聊天；“重新开始”先清除主�
 
 - 每封信都会有回信，没有 `reply` 参数；不需要回复的内容用即时消息。
 - 每件事只正式回一次。PARENT 指向发件 Run 正在办理的 Agent 来信或独立用户/Automation mail 根节点。派出子信后原信保持 delivered，不发接单回信；每封子信的回信全部消费、且无在途回信后，由接手 Run 的最终输出回复。普通 Agent 可同 Run wait，也可结束后由回信启动新 Run 接手。回复包含这件事历轮发布产物和子回信产物；outcome 为 completed|failed|canceled。
-- 补充：普通 Chat 中仅同发信 Chat、同 PARENT 的 Agent 来信可合并；不同用户请求各有独立根节点。用户插话不改变当前 Run 的在办事项。BOT 主 Chat 仍逐封开 Run。回信、通知和请示只有属于当前在办事项才插入；否则排队。
+- 补充：普通 Chat 中仅同发信 Chat、同 PARENT 的 Agent 来信可合并，且只并入消费该件事首封信的那个 Run；由子回信开出的同一件事后续 Run 不接收补充信，补充信排队后单独开 Run、单独回复。不同用户请求各有独立根节点。用户插话不改变当前 Run 的在办事项。BOT 主 Chat 仍逐封开 Run。回信、通知和请示只有属于当前在办事项才插入；否则排队。
 - 回信本身不要求独立回信；它可能启动一个接手上游原信的汇总 Run。用户/Automation 根节点不回信。
 - 生成回信、写 `ANSWERED_BY_MAIL_ID_`、原信转为 `done` 在同一事务中完成。回信按 `REPLY_KEY_` 唯一：正常回信为 `run:<runId>:<toChatId>`；失败回信（投递复核失败或收件会话被删除，此时还没有 Run）为 `letter:<letterId>`。
 

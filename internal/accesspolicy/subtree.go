@@ -59,7 +59,16 @@ func BuildWalkPlan(cfg config.AccessPolicyConfig, session QuerySession, mode Acc
 			parts := strings.Split(filepath.ToSlash(rel), "/")
 			if len(parts) > 0 && session.CanReadChatFiles(parts[0]) {
 				dir := filepath.Join(chats.Host, parts[0])
-				roots = append(roots, filepath.Join(dir, ".btw"), filepath.Join(dir, ".explain"))
+				for _, lane := range []string{".btw", ".explain"} {
+					side := filepath.Join(dir, lane)
+					// The Chat file grant excludes side lanes. Callers only honour
+					// a blocked walk, so a lane the ordinary policy would not allow
+					// outright must block; one it allows (full_access) need not.
+					if plan, err := BuildPathPlan(cfg, session, mode, side); err == nil && plan.Decision == DecisionAllow {
+						continue
+					}
+					roots = append(roots, side)
+				}
 			}
 		}
 	}

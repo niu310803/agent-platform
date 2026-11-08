@@ -89,7 +89,10 @@ func (s *Service) CanInsert(runID string, m Mail) (bool, error) {
 		return false, err
 	}
 	if m.Kind == Letter {
-		return !queryinput.UserMailOrigin(work.OriginType) && m.FromChatID == work.FromChatID && m.ParentID == work.ParentID, nil
+		// A supplement joins only the Run that consumed the work's first letter.
+		// Completion answers that Run's letter group, so a later Run of the same
+		// work would leave the supplement unanswered; it queues for its own Run.
+		return !queryinput.UserMailOrigin(work.OriginType) && work.RunID == runID && m.FromChatID == work.FromChatID && m.ParentID == work.ParentID, nil
 	}
 	incoming, err := s.Store.WorkForMail(m)
 	if errors.Is(err, ErrNotFound) {
@@ -162,7 +165,12 @@ func (s *Service) workHeader(m Mail) string {
 			if reply.Status != Delivered && reply.ID != m.ID {
 				continue
 			}
-			fmt.Fprintf(&b, "Result %s (%s): %s\n", reply.ID, reply.Outcome, headerText(reply))
+			if reply.ID == m.ID {
+				// This reply's body follows the header; repeating it wastes context.
+				fmt.Fprintf(&b, "Result %s (%s): see this mail's body.\n", reply.ID, reply.Outcome)
+			} else {
+				fmt.Fprintf(&b, "Result %s (%s): %s\n", reply.ID, reply.Outcome, headerText(reply))
+			}
 			for _, f := range reply.Files {
 				fmt.Fprintf(&b, "Artifact: @chat/%s\n", f.Path)
 			}
@@ -216,6 +224,11 @@ func (s *Service) InheritWork(runID, sourceRunID string) error {
 	}
 	s.inheritedWork[runID] = work.ID
 	return nil
+}
+func (s *Service) forgetInheritedWork(runID string) {
+	s.mu.Lock()
+	delete(s.inheritedWork, runID)
+	s.mu.Unlock()
 }
 func (s *Service) workForRun(runID string) (Mail, error) {
 	s.mu.Lock()

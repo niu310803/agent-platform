@@ -73,8 +73,11 @@ func TestWorkCrossRunParallelAndDuplicateCompletion(t *testing.T) {
 	completeWork(t, s, "w1", "first result")
 	r1 := consumeReply(t, s, "child1", "b3")
 	header := s.renderHeader(r1)
-	if !strings.Contains(header, "second result") || !strings.Contains(header, "first result") || !strings.Contains(header, original.ID) {
+	if !strings.Contains(header, "second result") || !strings.Contains(header, original.ID) || !strings.Contains(header+s.Body(r1), "first result") {
 		t.Fatalf("incomplete aggregation materials: %s", header)
+	}
+	if strings.Contains(header, "first result") {
+		t.Fatalf("the delivered reply body is repeated in its own header: %s", header)
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -236,6 +239,45 @@ func TestConfirmedPlanExecutionKeepsUserRoot(t *testing.T) {
 	work, err := s.workForRun("execute")
 	if err != nil || work.ID != m.ID {
 		t.Fatalf("lost plan root: %+v %v", work, err)
+	}
+	completeWork(t, s, "execute", "done")
+	s.mu.Lock()
+	_, kept := s.inheritedWork["execute"]
+	s.mu.Unlock()
+	if kept {
+		t.Fatal("finished execution Run kept its inherited plan work")
+	}
+}
+
+// X1 handles U and defers on a child whose reply opens X2. A supplement from
+// the same sender must not join X2: completion answers only X1's letter group,
+// so it queues and its own Run answers it.
+func TestSupplementForLaterWorkRunQueuesAndIsAnswered(t *testing.T) {
+	s, _ := testBox(t)
+	u := workLetter(t, s, "u", "x1", "p", "x", "p-root")
+	workLetter(t, s, "c", "y1", "x", "y", u.ID)
+	completeWork(t, s, "x1", "dispatched")
+	completeWork(t, s, "y1", "child result")
+	consumeReply(t, s, "c", "x2")
+	supplement := sample("m", Letter, Queued)
+	supplement.FromChatID, supplement.ToChatID, supplement.ParentID = "p", "x", "p-root"
+	if ok, err := s.CanInsert("x2", supplement); err != nil || ok {
+		t.Fatalf("supplement joined a later Run of the work: %v %v", ok, err)
+	}
+	same := sample("m1", Letter, Queued)
+	same.FromChatID, same.ToChatID, same.ParentID = "p", "x", "p-root"
+	if ok, err := s.CanInsert("x1", same); err != nil || !ok {
+		t.Fatalf("supplement rejected by the Run that consumed the work: %v %v", ok, err)
+	}
+	completeWork(t, s, "x2", "final for u")
+	workLetter(t, s, supplement.ID, "x3", "p", "x", "p-root")
+	completeWork(t, s, "x3", "final for m")
+	for id, want := range map[string]string{u.ID: "final for u", supplement.ID: "final for m"} {
+		got, _ := s.Store.Get(id)
+		reply, err := s.Store.Get(got.AnsweredBy)
+		if err != nil || got.Status != Done || reply.Message != want {
+			t.Fatalf("%s not answered by its own Run: %+v %+v %v", id, got, reply, err)
+		}
 	}
 }
 

@@ -364,6 +364,7 @@ func (s *Server) applyGeneralDefaultAgentConfig(definition map[string]any) map[s
 		defaults = s.deps.Config.GeneralSettings.DefaultAgent
 	case mode == "BOT":
 		defaults = s.deps.Config.BotSettings.DefaultAgent
+		definition = agentbuiltin.ApplyBotCreateDefaults(definition)
 	case mode == "TEAM":
 		defaults = s.deps.Config.TeamSettings.DefaultAgent
 	case agentbuiltin.IsExecutorMode(mode):
@@ -432,7 +433,8 @@ func (s *Server) normalizeGeneratedModeCreation(key string, definition map[strin
 
 	runtimeCfg := contracts.AnyMapNode(out["runtimeConfig"])
 	wsRoot := strings.TrimSpace(stringValue(runtimeCfg["workspaceRoot"]))
-	if wsRoot != "" {
+	// Only a project directory names the Agent; @root is not a project.
+	if wsRoot != "" && wsRoot != "@root" {
 		existingName := strings.TrimSpace(stringValue(out["name"]))
 		if existingName == "" {
 			out["name"] = filepath.Base(wsRoot)

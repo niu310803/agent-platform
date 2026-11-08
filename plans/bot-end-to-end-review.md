@@ -658,3 +658,15 @@ FILES_ 的 fromMailId/sha256、waiting/approval 精确标识（适用时）：
 未验收：真实模型发现/创建完整 BOT、实际部署 revision、WebClient/Desktop 展示与审批回放、真人跨 BOT 并发和产物链路。§10、§12 的目标环境用例不因这些源码测试而自动勾选。重启恢复、整件事取消、Automation 记录与 Agent 来信规划语义仍按 §8.14 保留。
 
 检查结果：`go test ./...` 全仓通过（包含 Server 的 HTTP/SSE 与模型请求集成测试）；`go test -race ./internal/mailbox ./internal/runtime/query ./internal/accesspolicy ./internal/runtime/session` 通过；`git diff --check` 通过。全仓初次运行曾遇到 hostenv 的 NPM 探针 3 秒超时，定向重跑与最终全仓运行均通过。另补递归读测试发现 macOS `/var` → `/private/var` 根路径需 canonical 后再比较，已修正并纳入路径回归。
+
+### 13.1 复审修复（2026-11-08，提交 37322400 之后）
+
+复审发现并修复：
+
+- 补充信只并入消费该件事首封信的 Run（`CanInsert` 增加 `work.RunID == runID`）。此前由子回信开出的后续 Run 也会接收同发信 Chat、同 PARENT 的补充信，但完成时只结算首个 Run 的信组，补充信永不回复，发信方那件事随之永远等待。回归：`TestSupplementForLaterWorkRunQueuesAndIsAnswered`，去掉该条件时失败。
+- macOS 等不区分大小写的卷上，`.BTW`、`.Explain`、`*.JSONL` 可绕过同 BOT Chat 文件授权的排除；改为不分大小写比较，补入 `chat_files_test.go`。
+- 递归读取已授权 Chat 目录时，旁路目录只在常规策略不能直接读取时才使递归硬拒绝；修复前 full_access 下也被拒绝，属本批引入的回退。
+- 规划执行 Run 的 `inheritedWork` 在 Completed 后删除，避免进程内只增不减。
+- 完成投递的事项清单不再重复本封回信正文，改为注明见正文，与 §8.11“本次回信照常作为正文”一致。
+
+复审测试：`go test -race ./internal/mailbox ./internal/accesspolicy` 通过。复审期间一次 `go test ./...` 中 internal/server 的 `TestQueryCanExecuteBackendToolLoop` 出现 panic，单测连跑 40 次与 server 包不走缓存全量 2 次均通过，未取得堆栈，暂按间歇失败记录，与本批改动的关系未确认。

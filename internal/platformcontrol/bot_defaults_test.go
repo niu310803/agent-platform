@@ -33,6 +33,9 @@ func TestCatalogBotDefaultsUseWorkerConfiguration(t *testing.T) {
 			if _, exists := definition["connectorConfig"]; exists {
 				t.Fatal("creation defaults must not implicitly grant connectors")
 			}
+			if contracts.AnyMapNode(definition["runtimeConfig"])["workspaceRoot"] != "@root" {
+				t.Fatalf("new BOT must default to the host root Workspace: %#v", definition)
+			}
 		})
 	}
 }

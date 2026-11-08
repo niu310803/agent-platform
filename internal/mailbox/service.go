@@ -731,6 +731,8 @@ func (s *Service) Completed(completion chat.RunCompletion, hop int) error {
 		}
 	}
 	s.mu.Unlock()
+	// The inherited plan work is read below; the finished Run never sends again.
+	defer s.forgetInheritedWork(completion.RunID)
 	asks, err := s.Store.AsksFromRun(completion.RunID)
 	if err != nil {
 		return err

@@ -2041,6 +2041,41 @@ func TestAgentCreateGeneralAppliesDefaultsAndReportsEngine(t *testing.T) {
 	}
 }
 
+func TestAgentCreateBotDefaultsWorkspaceToHostRootOnlyWhenMissing(t *testing.T) {
+	explicit := t.TempDir()
+	for name, tc := range map[string]struct {
+		runtimeConfig map[string]any
+		want          string
+	}{"missing": {nil, "@root"}, "explicit": {map[string]any{"workspaceRoot": explicit}, explicit}} {
+		t.Run(name, func(t *testing.T) {
+			// BOT keys are generated per second, so each case uses its own fixture.
+			fixture := newTestFixture(t)
+			definition := map[string]any{"mode": "BOT", "modelConfig": map[string]any{"modelKey": "mock-model"}}
+			if tc.runtimeConfig != nil {
+				definition["runtimeConfig"] = tc.runtimeConfig
+			}
+			created := postAgentJSON[api.AgentDetailResponse](t, fixture.server, "/api/admin/agents/create", map[string]any{"definition": definition})
+			runtimeOut, _ := created.Definition["runtimeConfig"].(map[string]any)
+			if got := runtimeOut["workspaceRoot"]; got != tc.want {
+				t.Fatalf("workspaceRoot=%#v, want %q", got, tc.want)
+			}
+			if tc.runtimeConfig == nil && created.Definition["name"] == "@root" {
+				t.Fatalf("the default host root must not name the Agent: %#v", created.Definition)
+			}
+			if tc.runtimeConfig == nil {
+				return
+			}
+			// Updating an existing BOT is not creation and never adds a Workspace.
+			updatedDefinition := created.Definition
+			delete(updatedDefinition, "runtimeConfig")
+			updated := postAgentJSON[api.AgentDetailResponse](t, fixture.server, "/api/admin/agents/update", map[string]any{"key": created.Key, "definition": updatedDefinition})
+			if _, exists := updated.Definition["runtimeConfig"]; exists {
+				t.Fatalf("update must not apply creation defaults: %#v", updated.Definition)
+			}
+		})
+	}
+}
+
 func TestTEAMAgentHTTPCRUD(t *testing.T) {
 	fixture := newTestFixture(t)
 	created := postAgentJSON[api.AgentDetailResponse](t, fixture.server, "/api/admin/agents/create", map[string]any{

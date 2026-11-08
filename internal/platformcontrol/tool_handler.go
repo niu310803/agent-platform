@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"agent-platform/internal/adminsource"
+	agentbot "agent-platform/internal/agent/bot"
 	agentcoder "agent-platform/internal/agent/coder"
 	agentgeneral "agent-platform/internal/agent/general"
 	agentkbase "agent-platform/internal/agent/kbase"
@@ -67,6 +68,9 @@ func (h *ToolHandler) get(path string) contracts.ToolExecutionResult {
 		definition := agentgeneral.ApplyCreateDefaults(map[string]any{"mode": mode}, agentgeneral.CreateDefaults{
 			ModelKey: defaults.ModelKey, ReasoningEffort: defaults.ReasoningEffort, Budget: defaults.Budget,
 		})
+		if path == BotCreationPath {
+			definition = agentbot.ApplyCreateDefaults(definition)
+		}
 		missing := missingDefinitionFields(definition, "modelConfig.modelKey")
 		return successResult(map[string]any{
 			"path":               path,
