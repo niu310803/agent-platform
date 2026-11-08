@@ -19,7 +19,7 @@ import (
 	"agent-platform/internal/config"
 )
 
-func TestBotPrimaryRunPublishesExactlySixToolsWithoutTaskMount(t *testing.T) {
+func TestBotPrimaryRunPublishesExactlySevenToolsWithoutTaskMount(t *testing.T) {
 	requests := make(chan map[string]any, 1)
 	f := newTestFixtureWithModelHandlerAndOptions(t, func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -63,7 +63,7 @@ func TestBotPrimaryRunPublishesExactlySixToolsWithoutTaskMount(t *testing.T) {
 			names = append(names, name)
 		}
 	}
-	want := []string{"chat_send", "chat_submit", "chat_get_status", "chat_interrupt", "chat_query", "action_announce"}
+	want := []string{"chat_send", "chat_submit", "chat_get_status", "chat_interrupt", "chat_query", "agent_query", "action_announce"}
 	sort.Strings(names)
 	sort.Strings(want)
 	if !reflect.DeepEqual(names, want) {

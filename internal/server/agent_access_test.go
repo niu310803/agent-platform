@@ -119,7 +119,7 @@ func TestGeneratedMailboxAccessFrozenFromReceivingAgent(t *testing.T) {
 	defer func() { cancel(); box.Close() }()
 	q := testQueryService(f.server)
 	q.BindMailbox(box)
-	parent := mailbox.Mail{ID: "opening", Kind: mailbox.Letter, Status: mailbox.Delivered, ToAgentKey: "mock-agent", ToChatID: "worker", FromAgentKey: "mock-agent", FromChatID: "lead", FromRunID: "lead-run", FromToolID: "send", RunID: "worker-run", Delivery: "started", Hop: 1, AccessLevel: "ask_for_approval", Subject: "alice", Message: "task"}
+	parent := mailbox.Mail{ID: "opening", OriginType: "agent", Kind: mailbox.Letter, Status: mailbox.Delivered, ToAgentKey: "mock-agent", ToChatID: "worker", FromAgentKey: "mock-agent", FromChatID: "lead", FromRunID: "lead-run", FromToolID: "send", RunID: "worker-run", Delivery: "started", Hop: 1, AccessLevel: "ask_for_approval", Subject: "alice", Message: "task"}
 	if _, _, err := store.Accept(parent); err != nil {
 		t.Fatal(err)
 	}

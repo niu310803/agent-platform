@@ -102,7 +102,7 @@ func (mailRoleSummary) Summary(string) (*chat.Summary, error) {
 	return &chat.Summary{ChatID: "primary", AgentKey: "a", Source: "query:owner"}, nil
 }
 
-func TestPrimaryQueuePolicyOnlyChangesBot(t *testing.T) {
+func TestPrimaryQueuesAllMailAndOrdinaryChatsQueueUnrelatedWork(t *testing.T) {
 	for _, mode := range []string{"BOT", "GENERAL", "CODER", "KBASE", "EXECUTOR"} {
 		def := catalog.AgentDefinition{Key: "a", Mode: mode}
 		runs := runstate.NewManager()
@@ -110,7 +110,7 @@ func TestPrimaryQueuePolicyOnlyChangesBot(t *testing.T) {
 		s := NewService(Dependencies{Registry: primaryRoleRegistry{def: def}, Runs: runs, Sessions: sessionbuild.New(sessionbuild.Dependencies{}), Chats: primaryRoleStore{Store: mailRoleSummary{}, PrimaryStore: primaryPointer{}}})
 		for _, kind := range []mailbox.Kind{mailbox.Letter, mailbox.Reply, mailbox.Notify, mailbox.Ask} {
 			target, err := s.MailTarget(t.Context(), mailbox.Mail{Kind: kind, OriginType: "agent", ToAgentKey: "a", ToChatID: "primary", FromChatID: "worker", Subject: "owner"})
-			if err != nil || target.Queue != (mode == "BOT") {
+			if err != nil || !target.Queue {
 				t.Fatalf("%s kind=%s target=%+v err=%v", mode, kind, target, err)
 			}
 		}

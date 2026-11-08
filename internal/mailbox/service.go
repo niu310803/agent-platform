@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +35,7 @@ type Service struct {
 	prepared         map[string]*preparedMail
 	stop             chan struct{}
 	retentionStarted bool
+	inheritedWork    map[string]string
 	retries          map[string]*time.Timer
 	retryDelay       map[string]time.Duration
 }
@@ -225,6 +225,11 @@ func (s *Service) Send(ctx context.Context, req Request) (Receipt, error) {
 	m := Mail{ID: id, Kind: Letter, Status: Accepting, CreatedAt: now(), UpdatedAt: now(), ToAgentKey: prepared.Request.AgentKey, ToChatID: prepared.ChatID, OpenedChat: prepared.OpenedChat, NewChat: req.NewChat,
 		OriginType: "agent", FromAgentKey: req.Start.Origin.AgentKey, FromChatID: req.Start.Origin.ChatID, FromRunID: req.Start.Origin.RunID, FromToolID: req.Start.Origin.ToolID, Subject: req.Start.Origin.Subject,
 		Input: input, Message: req.Start.Message, References: prepared.Request.References, Files: files, Hop: req.Hop + 1, RequestDigest: d}
+	if work, e := s.workForRun(req.Start.Origin.RunID); e == nil {
+		m.ParentID = work.ID
+	} else if !errors.Is(e, ErrNotFound) {
+		return Receipt{}, e
+	}
 	if prepared.Request.ModelKey != "" || prepared.Request.ReasoningEffort != "" {
 		m.Model = &queryinput.QueryModelOptions{Key: prepared.Request.ModelKey, ReasoningEffort: prepared.Request.ReasoningEffort}
 	}
@@ -368,6 +373,9 @@ func (s *Service) dispatch(chatID string) error {
 			continue
 		}
 		if target.Queue {
+			if target.AllowLaterMail {
+				continue
+			}
 			s.resetRetry(chatID)
 			return nil
 		}
@@ -520,6 +528,9 @@ func (s *Service) Action(ctx context.Context, id, action, subject string, scope 
 	if m.Status != Suspended || (m.Kind != Letter && m.Kind != Reply) || m.PurgedAt != 0 {
 		return m, failure("mail_state_conflict", "only suspended mail can be redelivered or discarded")
 	}
+	if action == "discard" {
+		return s.discard(ctx, m, scope)
+	}
 	if action == "redeliver" {
 		if m.ToChatClosedAt != 0 {
 			return m, failure("chat_deleted", "receiving Chat was deleted")
@@ -539,10 +550,6 @@ func (s *Service) Action(ctx context.Context, id, action, subject string, scope 
 		if row.Status != Suspended || action == "redeliver" && (row.ToChatClosedAt != 0 || row.PurgedAt != 0) {
 			return failure("mail_state_conflict", "mail state changed")
 		}
-		if action == "discard" {
-			row.Status = Discarded
-			return nil
-		}
 		row.Status = Queued
 		if row.ResumePhase == Accepting {
 			row.Status = Accepting
@@ -555,9 +562,6 @@ func (s *Service) Action(ctx context.Context, id, action, subject string, scope 
 	})
 	if err != nil {
 		return m, err
-	}
-	if action == "discard" {
-		return m, nil
 	}
 	if m.Status == Accepting {
 		if err = s.finishAcceptance(context.WithoutCancel(ctx), m); err != nil {
@@ -586,7 +590,7 @@ func (s *Service) renderHeader(m Mail) string {
 	header := "[" + name + " " + m.ID + " from agent " + strconv.Quote(m.FromAgentKey) + " (" + sender + ")"
 	switch m.Kind {
 	case Letter:
-		header += ". Your final answer in this run will be sent back as the reply."
+		header += ". Your final answer will be sent back as the reply. If you send letters for this work and end the run, the reply is sent after their replies return, from the run that handles the last one."
 	case Reply:
 		if ids, _ := s.Store.AnsweredLetters(m.ID); len(ids) > 0 {
 			header += ", answering your letters " + strings.Join(ids, ", ")
@@ -611,7 +615,7 @@ func (s *Service) renderHeader(m Mail) string {
 		}
 		header += "\n"
 	}
-	return header
+	return header + s.workHeader(m)
 }
 
 func (s *Service) fail(m Mail, err error) error {
@@ -694,7 +698,7 @@ func (s *Service) settle(replies, letters []Mail, failed bool) error {
 }
 func (s *Service) newReply(m Mail, key, runID, text, outcome string) Mail {
 	r := Mail{ID: NewID("mail"), Kind: Reply, Status: Queued, CreatedAt: now(), UpdatedAt: now(), ToAgentKey: m.FromAgentKey, ToChatID: m.FromChatID,
-		OriginType: "agent", FromAgentKey: m.ToAgentKey, FromChatID: m.ToChatID, FromRunID: runID, Subject: m.Subject, Message: text, Hop: m.Hop + 1, ReplyKey: key, ReplyOfRun: runID, Outcome: outcome,
+		OriginType: "agent", FromAgentKey: m.ToAgentKey, FromChatID: m.ToChatID, FromRunID: runID, Subject: m.Subject, Message: text, Hop: m.Hop, ReplyKey: key, ReplyOfRun: runID, Outcome: outcome, ParentID: m.ID,
 		FromChatClosedAt: m.ToChatClosedAt, ToChatClosedAt: m.FromChatClosedAt}
 	grant, err := s.port.MailDefaultAccess(r.ToAgentKey)
 	if err != nil {
@@ -749,7 +753,7 @@ func (s *Service) Completed(completion chat.RunCompletion, hop int) error {
 	if err != nil {
 		return err
 	}
-	groups := map[string][]Mail{}
+
 	for _, m := range rows {
 		if m.Status == Inflight {
 			if m.Delivery == "started" {
@@ -790,39 +794,37 @@ func (s *Service) Completed(completion chat.RunCompletion, hop int) error {
 			}
 			continue
 		}
-		if m.Kind == Letter && m.Status == Delivered && m.AnsweredBy == "" {
-			groups[m.FromChatID] = append(groups[m.FromChatID], m)
-		}
+
 	}
-	chatIDs := make([]string, 0, len(groups))
-	for chatID := range groups {
-		chatIDs = append(chatIDs, chatID)
+	work, err := s.workForRun(completion.RunID)
+	if errors.Is(err, ErrNotFound) {
+		return nil
 	}
-	sort.Strings(chatIDs)
-	var replies, letters []Mail
-	for _, chatID := range chatIDs {
-		group := groups[chatID]
-		r := s.newReply(group[0], "run:"+completion.RunID+":"+chatID, completion.RunID, completion.AssistantText, outcome(completion.FinishReason))
-		r.Hop = hop + 1
-		attachmentErr := s.replyFiles(&r)
-		if attachmentErr == nil {
-			attachmentErr = s.copyFiles(r)
-		}
-		if attachmentErr != nil {
-			// Preserve the complete result even if the filesystem is temporarily
-			// unavailable. A human can resume attachment materialization later.
-			r.Status = Suspended
-			r.ResumePhase = Accepting
-			r.Evidence = "none"
-			r.Error = errorData(attachmentErr)
-		}
-		replies = append(replies, r)
-		letters = append(letters, group...)
+	if err != nil {
+		return err
 	}
-	if len(replies) > 0 {
-		return s.settle(replies, letters, false)
+	if queryinput.UserMailOrigin(work.OriginType) || work.Terminal() || work.AnsweredBy != "" {
+		return nil
 	}
-	return nil
+	waiting, err := s.Store.PendingChildren(work.ID)
+	if err != nil || waiting > 0 {
+		return err
+	}
+	group, err := s.Store.WorkGroup(work)
+	if err != nil {
+		return err
+	}
+	r := s.newReply(work, "run:"+completion.RunID+":"+work.FromChatID, completion.RunID, completion.AssistantText, outcome(completion.FinishReason))
+	r.Hop = hop
+	attachmentErr := s.replyFiles(&r)
+	if attachmentErr == nil {
+		attachmentErr = s.copyFiles(r)
+	}
+	if attachmentErr != nil {
+		r.Status, r.ResumePhase, r.Evidence = Suspended, Accepting, "none"
+		r.Error = errorData(attachmentErr)
+	}
+	return s.settle([]Mail{r}, group, false)
 }
 
 type artifactReader interface {

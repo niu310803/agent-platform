@@ -45,6 +45,7 @@ func controlFail(code, message, stage string) contracts.ToolExecutionResult {
 }
 
 var argumentFields = map[string]map[string]string{
+	"agent_query.list":            {"query": "s", "limit": "n", "cursor": "s"},
 	"catalog_query.resourceTypes": {},
 	"catalog_query.list":          {"resourceType": "s!", "status": "s", "limit": "n", "cursor": "s"},
 	"catalog_query.get":           {"resourceType": "s!", "resourceKey": "s!", "path": "s"},
@@ -73,7 +74,7 @@ var argumentFields = map[string]map[string]string{
 
 func (h *ToolHandler) admitted(tool string, args map[string]any, e *contracts.ExecutionContext) (string, map[string]any, error) {
 	owner, registered := connector.NativeToolConnector(tool)
-	if !registered || e == nil || e.Session.NativeConnectorTools[tool] != owner || e.Session.ConnectorDirs[owner] == "" {
+	if !registered || e == nil || !e.Session.ProvidesPrimaryTool(tool) && (e.Session.NativeConnectorTools[tool] != owner || e.Session.ConnectorDirs[owner] == "") {
 		return "", nil, fmt.Errorf("connector_not_mounted: configure %s for this Agent through an authorized configuration change, then start a new Run", owner)
 	}
 	if (connector.IsPlatformRootTool(tool) || tool == "platform_inspect" && args["action"] == "checkConnector") && !rootCaller(e) {
@@ -215,6 +216,8 @@ func (h *ToolHandler) Invoke(ctx context.Context, tool string, args map[string]a
 		value, err = h.invokeLibrary(ctx, tool, action, p, e)
 	case "automation_query", "automation_manage":
 		value, err = h.invokeAutomation(tool, action, p, e)
+	case "agent_query":
+		value, err = h.agentQuery(ctx, p)
 	case "catalog_query":
 		value, err = h.catalogQuery(ctx, action, p)
 	case "catalog_manage":

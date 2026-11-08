@@ -48,7 +48,7 @@ func NewToolHandler(cfg config.Config, registry catalog.Registry, chats ChatPinS
 }
 
 func (h *ToolHandler) ToolNames() []string {
-	return []string{"automation_query", "automation_manage", "catalog_query", "catalog_manage", "chat_query", "chat_manage", "platform_inspect", "kbase_library_query", "kbase_library_manage"}
+	return []string{"automation_query", "automation_manage", "catalog_query", "catalog_manage", "agent_query", "chat_query", "chat_manage", "platform_inspect", "kbase_library_query", "kbase_library_manage"}
 }
 
 func (h *ToolHandler) get(path string) contracts.ToolExecutionResult {

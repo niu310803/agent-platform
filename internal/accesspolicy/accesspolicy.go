@@ -163,6 +163,24 @@ func BuildPathPlan(cfg config.AccessPolicyConfig, session QuerySession, mode Acc
 		}
 	}
 
+	if mode == ReadAccess && !session.AgentHasRuntimeSandbox && session.CanReadChatFiles != nil {
+		if roots, err := sessionRoots(session); err == nil && roots.ClassifyCanonical(realCandidate) == rootpaths.ZoneOtherChat {
+			rel, err := filepath.Rel(roots.Chats.Host, realCandidate.Host)
+			if err == nil {
+				parts := strings.Split(filepath.ToSlash(rel), "/")
+				// A directory grant cannot include sibling JSONL or side lanes.
+				allowed := len(parts) > 0 && parts[0] != "" && parts[0] != "." && parts[0] != ".." && !strings.HasSuffix(parts[0], ".jsonl")
+				for _, part := range parts[1:] {
+					if part == ".btw" || part == ".explain" {
+						allowed = false
+					}
+				}
+				if allowed && session.CanReadChatFiles(parts[0]) {
+					return buildPathPlan(mode, rawPath, realCandidate, realCandidate, accessLevel, DecisionAllow, "authorized Chat file read"), nil
+				}
+			}
+		}
+	}
 	roots := level.ReadRoots
 	action := level.Approvals.ReadOutsideRoots
 	if mode == WriteAccess {

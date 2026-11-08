@@ -89,24 +89,24 @@ WebClient 只在 BOT 聊天经 `/api/send` 发送普通文本，待发消息按�
 
 ## 投递规则
 
-只有 Native `mode: BOT` 的主要聊天按到达顺序逐条开 Run，正在运行时所有 mail 留在队列，不插入。BOT 的其他所有聊天都是分身，不按发起方或 JSONL 判断，重启后身份不变；非 BOT 的主要聊天是普通聊天，保持现行投递规则，不迁移。BOT 可有 Workspace，不支持规划或 execute。`/api/send` 不带 chatId 时使用 BOT 的主要聊天，没有则创建并设指针；用户不能为 BOT 新建普通聊天，分身由 `chat_send {newChat:true}` 创建。旧 `runtime.yml.primary-chat` 与 Agent 配置顶层 `primary` 段出现即报错；不再提供 `/api/runtime/capabilities` 或 `connected.data.primaryChat`。
+只有 Native `mode: BOT` 的主要聊天按到达顺序逐条开 Run，正在运行时所有 mail 留在队列，不插入。BOT 的其他所有聊天都是分身，不按发起方或 JSONL 判断，重启后身份不变；非 BOT 的主要聊天是普通聊天，按下述同事项插入与无关邮件排队规则处理，不增加 BOT 调度角色。BOT 可有 Workspace，不支持规划或 execute。`/api/send` 不带 chatId 时使用 BOT 的主要聊天，没有则创建并设指针；用户不能为 BOT 新建普通聊天，分身由 `chat_send {newChat:true}` 创建。旧 `runtime.yml.primary-chat` 与 Agent 配置顶层 `primary` 段出现即报错；不再提供 `/api/runtime/capabilities` 或 `connected.data.primaryChat`。
 
-主要聊天固定提供 `chat_send`、`chat_submit`、`chat_get_status`、`chat_interrupt`、`chat_query` 和 `action_announce`，不要求挂载 task-control，不装配 Agent 的执行工具、连接器、技能或 Workspace 提示文件。调度提示词来自 `agent-prompt.yml` 的 `bot.system-prompt`，再加 SOUL、Agent 名称与描述、分身工具与技能名称清单及配置选中的记忆。模型来自 `agent-settings.yml` 的 `bot.dispatch.modelKey/reasoningEffort`，空字段回退 Agent 配置。
+主要聊天固定提供 `chat_send`、`chat_submit`、`chat_get_status`、`chat_interrupt`、`chat_query`、`agent_query` 和 `action_announce`，不要求挂载 task-control，不装配 Agent 的执行工具、连接器、技能或 Workspace 提示文件。调度提示词来自 `agent-prompt.yml` 的 `bot.system-prompt`，再加 SOUL、Agent 名称与描述、分身工具与技能名称清单及配置选中的记忆。模型来自 `agent-settings.yml` 的 `bot.dispatch.modelKey/reasoningEffort`，空字段回退 Agent 配置。
 
-上述六工具限制作用于主 lane。BTW 与解读（explain）保留既有旁路合同：使用 Agent 配置的模型、上下文及工具定义，执行时强制只读，最多 3 轮、4 次工具调用；不注入主要聊天调度协议，不参与主队列，不获得发信、审批代答或写操作能力。这是已确认的旁路例外，不能作为主要聊天执行任务的入口。
+上述七工具限制作用于主 lane。BTW 与解读（explain）保留既有旁路合同：使用 Agent 配置的模型、上下文及工具定义，执行时强制只读，最多 3 轮、4 次工具调用；不注入主要聊天调度协议，不参与主队列，不获得发信、审批代答或写操作能力。这是已确认的旁路例外，不能作为主要聊天执行任务的入口。
 
-主要聊天的必要调度协议来自随包内置的 task-control `references/primary-chat.md`，装配时直接进入 system prompt，不要求读取 Skill 文件、不挂载技能或增加工具。协议包含发信与补充、文件复制、回执及控制资格、请示代答、查询参数和跳数限制。六个工具的主要聊天专用说明同时使用正确的档位/模型默认值，不再要求先读不可用的技能。`configs/agent-prompt.yml` 的 `bot.system-prompt` 仍控制部署侧调度提示词；即使自定义或清空该项，必要协议也独立保留。
+主要聊天的必要调度协议来自随包内置的 task-control `references/primary-chat.md`，装配时直接进入 system prompt，不要求读取 Skill 文件、不挂载技能或增加工具。协议包含发信与补充、文件复制、回执及控制资格、请示代答、查询参数和跳数限制。七个工具的主要聊天专用说明同时使用正确的档位/模型默认值，不再要求先读不可用的技能。`configs/agent-prompt.yml` 的 `bot.system-prompt` 仍控制部署侧调度提示词；即使自定义或清空该项，必要协议也独立保留。
 
 BOT 的每条非主聊天都移除 `chat_send`、`chat_submit`、`chat_get_status`、`chat_interrupt`，保留原本有效的 `chat_notify`；用户直接输入和重启不改变身份。分身主 lane 的 Run 与 `/api/chat` 读取固定使用 detailed 档位，不看 Agent 的 `defaultDetail`，见 [细节等级](API与协议.md#细节等级与-runactivity)。不再保存或读取 `mailNewChat`。BOT 不能作为 TEAM 成员或 `agent_invoke` 目标。其他 Agent 只允许寄往 BOT 主聊天，不能创建、读取或控制其分身；只有 BOT 当前主聊天可以给自己创建分身。BOT 主聊天的 `chat_query opened` 从 chats.db 的 `agentKey + primary:false` 列表读取并复核权限，独立于会被清空的 mail.db。
 
-BOT 不允许把已有分身提升为主聊天；“重新开始”先清除主指针，下一次 `/api/send` 创建新主聊天。客户端必须先提示：旧分身任务与结果仍属于旧聊天，不会自动转投新主聊天，尚未投递的工作可能取消。L2 与后续 L3 保持 ChatID；L3 具体压缩方式尚未实现。外部 Agent 给 BOT 派活后的跨 Run 最终结果关联也仍待设计。
+BOT 不允许把已有分身提升为主聊天；“重新开始”先清除主指针，下一次 `/api/send` 创建新主聊天。客户端必须先提示：旧分身任务与结果仍属于旧聊天，不会自动转投新主聊天，尚未投递的工作可能取消。L2 与后续 L3 保持 ChatID；L3 具体压缩方式尚未实现。外部 Agent 给 BOT 派活后，原信跨 Run 保留回复责任，全部子结果被消费后由接手 Run 回复一次。
 
 四类 mail 共用同一规则：对收件会话中 `queued` 的 mail 按时间顺序处理，视会话状态而定。
 
 | 会话状态 | 处理 |
 |---|---|
-| 没有 Run，也没有未决等待项 | 用最早的一条开 Run（`delivery = started`），其余插进这个 Run |
-| 有 Run，正常运行或停在普通 `wait` 上 | 经 steer 通道插入（`delivery = inserted`），`wait` 以唤醒原因 `mail` 被唤醒 |
+| 没有 Run，也没有未决等待项 | 用最早的一条开 Run（`delivery = started`），其余只在同一件事时插入 |
+| 有 Run，正常运行或停在普通 `wait` 上 | 同一件事经 steer 插入（`delivery = inserted`）并唤醒 `wait`；无关 mail 排队且不唤醒，后续同一件事的 mail 可继续投递 |
 | 有 Run，停在提问、审批或表单等待上 | 插入；内容在 Run 内排队，等待项解决后才被模型读到，不会代替作答 |
 | 有 Run，且是规划 Run | 排队（插入会作废候选计划） |
 | 有 Run，正在收尾或压缩 | 排队 |
@@ -125,9 +125,9 @@ BOT 不允许把已有分身提升为主聊天；“重新开始”先清除主�
 ## 信与回信
 
 - 每封信都会有回信，没有 `reply` 参数；不需要回复的内容用即时消息。
-- 一个 Run 只正式回一次。Run 结束时，对该 Run 消费过的信，每个发信会话各寄一封回信。正文是该 Run 的 `RunCompletion.AssistantText`（完整版的 lastRunContent），附带本 Run 通过 `artifact_publish` 发布的文件；`outcome` 为 `completed|failed|canceled`。
-- 补充：信插入仍在运行的会话时，与原来的信合并，只回一封；会话已空闲时，补充信开出新 Run，新 Run 结束后再回一封。
-- 回信本身不再要求回信。
+- 每件事只正式回一次。PARENT 指向发件 Run 正在办理的 Agent 来信或独立用户/Automation mail 根节点。派出子信后原信保持 delivered，不发接单回信；每封子信的回信全部消费、且无在途回信后，由接手 Run 的最终输出回复。普通 Agent 可同 Run wait，也可结束后由回信启动新 Run 接手。回复包含这件事历轮发布产物和子回信产物；outcome 为 completed|failed|canceled。
+- 补充：普通 Chat 中仅同发信 Chat、同 PARENT 的 Agent 来信可合并；不同用户请求各有独立根节点。用户插话不改变当前 Run 的在办事项。BOT 主 Chat 仍逐封开 Run。回信、通知和请示只有属于当前在办事项才插入；否则排队。
+- 回信本身不要求独立回信；它可能启动一个接手上游原信的汇总 Run。用户/Automation 根节点不回信。
 - 生成回信、写 `ANSWERED_BY_MAIL_ID_`、原信转为 `done` 在同一事务中完成。回信按 `REPLY_KEY_` 唯一：正常回信为 `run:<runId>:<toChatId>`；失败回信（投递复核失败或收件会话被删除，此时还没有 Run）为 `letter:<letterId>`。
 
 | 时间 | 发生了什么 |
@@ -171,7 +171,7 @@ BOT 不允许把已有分身提升为主聊天；“重新开始”先清除主�
 跳数表示这件事离用户最近一次亲口说话隔了多远，用于防止 Agent 之间无休止地派活、通知和请示。
 
 1. 用户、Automation、`/api/execute` 的输入为 0 跳。
-2. Run 发出的 mail（包括平台代它生成的回信）记为 Run 当前跳数 + 1，存于 `HOP_`。
+2. letter、notify、ask 为 Run 当前跳数 + 1；回信为接手 Run 的当前跳数，不再加一，存于 HOP_。
 3. Run 的当前跳数：收到用户直接输入时归 0；收到 mail 时取 `max(当前, mail.hop)`；被上级 `chat_submit` 答复时取 `max(当前, 上级当前 + 1)`。只在发出时加一，接收时不加。
 4. 达到上限后，`chat_send`、`chat_notify` 返回 `mail_hop_limit`，请示不再上报、只等用户；回信照常寄出，`chat_submit` 不受限制。
 5. 上限为 `mail.max-hops`，默认 4。
@@ -180,10 +180,10 @@ BOT 不允许把已有分身提升为主聊天；“重新开始”先清除主�
 |---|---|---|
 | 用户："整理周报" | 前台 R1 | 0 |
 | R1 派活 | 信，开出分身 R2 | 1 |
-| R2 结束 | 回信，开出 R3 | 2 |
-| R3 再派 | 信，开出分身 R4 | 3 |
-| R4 结束 | 回信，开出 R5 | 4 |
-| R5 还想派 | 被拒绝，R5 把结果交给用户 | — |
+| R2 结束 | 回信，开出 R3 | 1 |
+| R3 再派 | 信，开出分身 R4 | 2 |
+| R4 结束 | 回信，开出 R5 | 2 |
+| R5 再派 | 信，继续下一轮；达到 4 后不再派活 | 3 |
 
 ## 授权与控制
 
@@ -205,14 +205,14 @@ BOT 不允许把已有分身提升为主聊天；“重新开始”先清除主�
 
 **调用方限制。** 只有主 Agent 根 Run（含 TEAM 总控）能调用 `chat_send`、`chat_notify`、`chat_submit`；BTW、`agent_invoke` 子任务和 Team 成员不能调用，规划 Run 默认排除这三个工具。由信开出的 Run 调用 `chat_get_status`、`chat_interrupt`，或使用 `wait` 的 `run.terminal` 条件，仍返回 `run_chaining_not_allowed`，派完活应使用不带条件的普通 `wait` 等回信唤醒。回信、即时消息、请示唤醒的是收件会话自己的 Run，这些工具照常可用。
 
-BOT 主要聊天的固定六工具及所有分身的四工具排除优先于普通工具装配规则。此时主要聊天没有 `wait`，派活后结束本轮；后续回信排队唤醒新 Run。信直接唤醒主要聊天的 Run 仍遵守现有派生控制限制；回信、即时消息、请示唤醒不授予发信方对主要聊天 Run 的控制。
+BOT 主要聊天的固定七工具及所有分身的四工具排除优先于普通工具装配规则。此时主要聊天没有 `wait`，派活后结束本轮；后续回信排队唤醒新 Run。信直接唤醒主要聊天的 Run 仍遵守现有派生控制限制；回信、即时消息、请示唤醒不授予发信方对主要聊天 Run 的控制。
 
 ## 文件
 
 正文中的 `@chat/...` 属于发件会话，跨会话后会解析到收件会话，不能当作交付。
 
 - `chat_send`、`chat_notify` 的 `files`：受理时先写入 `accepting` 和附件清单（名称、大小、sha256），再从发件会话复制到收件会话的 `mail/<mailId>/`，复制时核对摘要，然后转为 `queued`。投递时再核对一次，不一致即失败。
-- 回信：生成时按同样方式复制本 Run 发布的文件。
+- 回信：复制整件事历轮发布文件及已消费子回信的文件，fromMailId 标明转来回信；SHA-256 去重，本 Chat 同名文件取最后一轮，转来同名异内容文件改名。输入附件与 notify 文件不向上传。
 - 正文不改写；信封头下方列出附件在收件会话中的路径。
 
 ## 新建会话与补建主要对话
@@ -238,7 +238,7 @@ BOT 主要聊天的固定六工具及所有分身的四工具排除优先于普�
 | `consumed` | 有消费证据 | 已处理过，重投会重新执行 |
 | `unknown` | 挂起前处于 `inflight` 且无消费证据，或远端结果未知 | 可能已处理，重投可能重复执行 |
 
-挂起的信和回信由人重投或丢弃（`discarded`，不发回信）。重投从挂起前的阶段继续：挂起前为 `accepting` 的，先补完受理（建会话、补建主要对话时重新仲裁、按清单复制附件），发件会话中的附件已变化或缺失则转为 `failed`；其他状态直接回到 `queued`。重投后由重投者接管投递身份。
+挂起的信和回信由人重投或丢弃（`discarded`，原子生成 failed 替代回信，键 discard:<被丢弃 mailId>；被丢弃回信的替代项沿用原 PARENT，收件 Chat 已关闭则不生成）。重投从挂起前的阶段继续：挂起前为 `accepting` 的，先补完受理（建会话、补建主要对话时重新仲裁、按清单复制附件），发件会话中的附件已变化或缺失则转为 `failed`；其他状态直接回到 `queued`。重投后由重投者接管投递身份。
 
 ## 删除、归档与保留期
 
@@ -259,7 +259,7 @@ BOT 主要聊天的固定六工具及所有分身的四工具排除优先于普�
 
 ## 数据结构
 
-`MAILS` 的建表与索引以 [store.go](../internal/mailbox/store.go) 为事实源：表名大写，字段为大写下划线加尾部 `_`，索引以 `IDX_` 开头，与 chats.db 风格一致；Go DTO 和 HTTP JSON 字段名保持原协议。关系字段为 `PARENT_MAIL_ID_`（即时消息、请示所属的信）、`ANSWERED_BY_MAIL_ID_`（回答这封信的回信）、`REPLY_OF_RUN_ID_`（回信来自的 Run）。
+`MAILS` 的建表与索引以 [store.go](../internal/mailbox/store.go) 为事实源：表名大写，字段为大写下划线加尾部 `_`，索引以 `IDX_` 开头，与 chats.db 风格一致；Go DTO 和 HTTP JSON 字段名保持原协议。关系字段为 `PARENT_MAIL_ID_`（发件 Run 在办的 Agent 信或用户 mail；回信指向其回答的信）、`ANSWERED_BY_MAIL_ID_`（回答这封信的回信）、`REPLY_OF_RUN_ID_`（回信来自的 Run）。
 
 Mailbox 尚未上线，schema 保持 V1，结构直接调整 DDL；并库前每次启动清空，application_id/user_version 只作身份标记。不迁移旧 mail 库，不影响 chats.db。
 
@@ -329,3 +329,9 @@ Answer with chat_submit runId="r_22" awaitingId="q_7", or ask the user if unsure
 `NEW_CHAT_` 只记录 chat_send newChat:true 创建关系；补建主要聊天仍用 OPENED_CHAT_ 重放受理，NEW_CHAT_ 为 0。GET /api/chats?openedBy=A 可与 agentKey=B 取交集，HTTP 与主 WS 使用相同应用服务；subject 来自可信上下文。查询不读取 JSONL，Run 状态按本页 ID 批量补齐。普通 wait 不算等待处理。重启后工作列表为空，旧聊天仍保留在历史中。
 
 GET /api/mails 返回 mails 摘要与 total，message 最多 200 字，不返回 input/accessGrant/附件；GET /api/mails/detail?mailId= 返回当前用户的全文、附件和请示等待项快照。WebClient 侧栏收件箱显示待收取总数；主聊天下显示工作会话，请示卡片可跳转分身或以用户身份调用 /api/submit，保留等待项、冻结操作与所有权校验。并发作答只有一次成功。上级代答展示来源与审批档位，实时与回放读取相同事件。
+
+## 跨 Run 汇总材料与实施验证
+
+完成原信的回信投递附事项清单，取自 MAILS 的原信、子信要求、各回信正文、状态与产物路径，不依赖被压缩的模型历史；仍有未回项时只列简短状态。每段最多 32000 字符，截断标明 mailId；30 天后子回信正文可能被清理，跨期工作可能缺内容。chat_get_status {mailId} 对待子结果的原信返回 status waiting 与 pendingReplies，不披露 worker Chat/Run。请示仍只到直接发信方，不穿透 BOT 主 Chat。
+
+这些合同已进入源码与回归测试，真实模型、WebClient/Desktop 联调和目标部署验收仍需按 plans/bot-end-to-end-review.md 记录；不宣称在途工作支持重启恢复或整件工作取消。

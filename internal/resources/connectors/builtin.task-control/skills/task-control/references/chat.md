@@ -2,6 +2,10 @@
 
 Use chat_query and chat_manage in an ordinary native main root Run with builtin.task-control mounted. Anonymous Runs can access only their current Chat; authenticated query-owned Chats remain owner restricted. Agent availability is not required for historical reads.
 
+## agent_query
+
+`{action:"list",args:{query?,limit?,cursor?}}` returns public valid Agent summaries: agentKey, name, mode and description. query matches key/name/description by case-insensitive substring. limit is 1–100 (default 20); cursor is the previous nextCursor. Filtered pages may be empty: keep following nextCursor. It does not list Chats or workers or grant send, invoke, history or control rights. BOT primary Chats receive this tool directly; ordinary Agents require builtin.task-control and an effective tool grant.
+
 ## Queries
 
 - opened: `{}` lists unarchived work Chats explicitly created by chat_send newChat:true for the calling Agent and subject in the current process. Uses the same summary query as /api/chats?openedBy; no legacy or JSONL scan; it grants no history-read or Run-control permission.

@@ -327,6 +327,17 @@ func (s *Builder) BuildQuerySession(ctx context.Context, req runtimetypes.QueryC
 		session.Subject = principal.Subject
 	}
 
+	if PrimaryChatEligible(agentDef) && session.Subject != "" && !session.AgentHasRuntimeSandbox {
+		subject, key := session.Subject, session.AgentKey
+		session.CanReadChatFiles = func(id string) bool {
+			if !chat.ValidChatID(id) {
+				return false
+			}
+			target, err := s.deps.Chats.Summary(id)
+			return err == nil && target != nil && target.AgentKey == key && target.Source == "query:"+subject
+		}
+	}
+
 	personalMemory := memory.NewStore(s.deps.Config.Paths.MemoryDir, s.deps.Config.Paths.OwnerDir, nil)
 	if ContainsTool(agentDef.ContextTags, "owner") {
 		owner, err := personalMemory.Read("owner", "")

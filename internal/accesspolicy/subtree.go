@@ -1,6 +1,7 @@
 package accesspolicy
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -45,6 +46,22 @@ func BuildWalkPlan(cfg config.AccessPolicyConfig, session QuerySession, mode Acc
 		}
 		roots = append(roots, session.SharedConnectorsRoot)
 		roots = append(roots, session.ControlReadonlyRoots...)
+	}
+	if mode == ReadAccess && session.CanReadChatFiles != nil && !session.AgentHasRuntimeSandbox {
+		chats, e := pathutil.Canonicalize(SessionChatsRoot(session))
+		if e == nil && chats.Key != "" && pathutil.WithinRoot(target, chats) {
+			rel, e := filepath.Rel(chats.Host, target.Host)
+			if e != nil {
+				p.Decision = DecisionBlock
+				p.Reason = "cannot resolve Chat subtree"
+				return p
+			}
+			parts := strings.Split(filepath.ToSlash(rel), "/")
+			if len(parts) > 0 && session.CanReadChatFiles(parts[0]) {
+				dir := filepath.Join(chats.Host, parts[0])
+				roots = append(roots, filepath.Join(dir, ".btw"), filepath.Join(dir, ".explain"))
+			}
+		}
 	}
 	if chats := SessionChatsRoot(session); chats != "" {
 		roots = append(roots, chats)

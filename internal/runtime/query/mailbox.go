@@ -498,7 +498,11 @@ func (s *Service) MailTarget(ctx context.Context, m mailbox.Mail) (mailbox.Targe
 			}
 			return mailbox.Target{RunID: active.RunID, Queue: queue, IgnoredOptions: ignored}, nil
 		}
-		return mailbox.Target{RunID: active.RunID, Queue: active.PlanningMode || active.State == contracts.RunLoopStateCompacting}, nil
+		same, err := s.mailbox.CanInsert(active.RunID, m)
+		if err != nil {
+			return mailbox.Target{}, err
+		}
+		return mailbox.Target{RunID: active.RunID, Queue: !same || active.PlanningMode || active.State == contracts.RunLoopStateCompacting, AllowLaterMail: !same && !active.PlanningMode && active.State != contracts.RunLoopStateCompacting}, nil
 	}
 	if gate := s.AwaitingQueryGateError(m.ToChatID, summary); gate != nil {
 		return mailbox.Target{Queue: true}, nil
@@ -636,6 +640,11 @@ func (s *Service) MailConsumedEvidence(m mailbox.Mail) (bool, error) {
 func (s *Service) bindMailboxSession(req runtimetypes.QueryCommand, session *contracts.QuerySession) {
 	if s.mailbox == nil || req.Lane != "" {
 		return
+	}
+	if req.PlanRunID != "" {
+		if err := s.mailbox.InheritWork(req.RunID, req.PlanRunID); err != nil && !errors.Is(err, mailbox.ErrNotFound) {
+			log.Printf("[mailbox] inherit plan work: %v", err)
+		}
 	}
 	session.Mail = req.Mail
 	if (req.Mail == nil || queryinput.UserMailOrigin(req.Mail.OriginType)) && (req.Origin == nil || req.Origin.Type == queryinput.OriginUser) {

@@ -57,6 +57,7 @@ var requiredBuiltinToolNames = []string{
 	"catalog_manage",
 	"kbase_library_query",
 	"kbase_library_manage",
+	"agent_query",
 	"chat_query",
 	"chat_manage",
 	"platform_inspect",

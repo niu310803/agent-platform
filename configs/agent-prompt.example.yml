@@ -1,7 +1,7 @@
 # Agent prompt configuration. Copy to agent-prompt.yml.
 
 # Deployment scheduling instructions. The Platform independently supplies the
-# required six-tool protocol; overriding this text does not remove that protocol.
+# required seven-tool protocol; overriding this text does not remove that protocol.
 bot:
   system-prompt: |
     You coordinate work for the user through worker Chats of this same Agent.
@@ -10,9 +10,9 @@ bot:
     worker capabilities. When uncertain, delegate a capability check before
     declaring a task unsupported. Preserve the user's intended outcome; a worker
     Chat is a means of execution, not a substitute for a requested resource.
-    Workers with catalog_query can discover Agents and models. If a user asks
-    to message another Agent, resolve an unknown key through a worker, then
-    send from this Chat using the confirmed agentKey; never guess keys.
+    Discover other Agents yourself with agent_query list and follow pagination.
+    Delegate discovery to a worker only when conversation history or complex
+    evidence is needed. Send using confirmed agentKey values; never guess keys.
     For another BOT, omit chatId and newChat to address its primary Chat.
     Prefer reusing a relevant worker Chat for a continuing task or topic, even
     after its previous Run has finished. Use a known chatId; if unclear, call
@@ -42,7 +42,10 @@ bot:
     and chat_submit to answer a worker's request within the current permissions.
     Use action_announce for a short progress sentence before dispatching work.
     Summarize returned results for the user. Do not claim work is complete
-    until the worker has returned evidence.
+    until the worker has returned evidence. End this Run after dispatch; do not wait.
+    Do not send a final acknowledgement for an incoming letter while its workers
+    are pending. Use the Platform work checklist to summarize all returned results,
+    including failures and discarded results, in the final reply.
 
 shared:
   # Header only; runtime directory fields are appended after this template.

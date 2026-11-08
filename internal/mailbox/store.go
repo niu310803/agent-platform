@@ -37,6 +37,7 @@ CREATE UNIQUE INDEX IDX_MAILS_REPLY_ ON MAILS(REPLY_KEY_) WHERE KIND_ = 'reply';
 CREATE UNIQUE INDEX IDX_MAILS_ASK_ ON MAILS(FROM_RUN_ID_,AWAITING_ID_) WHERE KIND_ = 'ask';
 CREATE INDEX IDX_MAILS_DELIVER_ ON MAILS(TO_CHAT_ID_,STATUS_,CREATED_AT_,MAIL_ID_);
 CREATE INDEX IDX_MAILS_INBOX_ ON MAILS(TO_AGENT_KEY_,CREATED_AT_);
+CREATE INDEX IDX_MAILS_PARENT_ ON MAILS(PARENT_MAIL_ID_,KIND_);
 CREATE INDEX IDX_MAILS_RUN_ ON MAILS(RUN_ID_);
 CREATE INDEX IDX_MAILS_STATUS_ ON MAILS(STATUS_);
 CREATE INDEX IDX_MAILS_ANSWERED_ ON MAILS(ANSWERED_BY_MAIL_ID_);
@@ -383,6 +384,22 @@ func (s *Store) Complete(replies []Mail, letters []Mail, failed bool) ([]Mail, [
 		if current.Terminal() || current.AnsweredBy != "" || current.FromChatClosedAt != 0 {
 			continue
 		}
+		if !failed {
+			var waiting int
+			workID := current.ID
+			for _, r := range replies {
+				if r.ToChatID == current.FromChatID && r.ParentID != "" {
+					workID = r.ParentID
+					break
+				}
+			}
+			if err := tx.QueryRow(pendingChildrenSQL, workID).Scan(&waiting); err != nil {
+				return nil, nil, err
+			}
+			if waiting > 0 {
+				continue
+			}
+		}
 		current.Error = snapshot.Error
 		pending = append(pending, current)
 	}
@@ -390,7 +407,7 @@ func (s *Store) Complete(replies []Mail, letters []Mail, failed bool) ([]Mail, [
 	for _, r := range replies {
 		eligible := false
 		for _, m := range letters {
-			key := "run:" + m.RunID + ":" + m.FromChatID
+			key := "run:" + r.ReplyOfRun + ":" + m.FromChatID
 			if failed {
 				key = "letter:" + m.ID
 			}
@@ -420,7 +437,13 @@ func (s *Store) Complete(replies []Mail, letters []Mail, failed bool) ([]Mail, [
 	}
 	for _, m := range letters {
 		var replyID string
-		key := "run:" + m.RunID + ":" + m.FromChatID
+		key := ""
+		for _, r := range replies {
+			if r.ToChatID == m.FromChatID {
+				key = r.ReplyKey
+				break
+			}
+		}
 		if failed {
 			key = "letter:" + m.ID
 		}

@@ -53,6 +53,10 @@ func TestMailboxStartsDetachedRunAndReturnsCompleteResultToWaitingChat(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Real query admission records a distinct user root before tools run.
+	if _, _, err := store.Accept(mailbox.Mail{ID: "user-root", Kind: mailbox.Letter, Status: mailbox.Delivered, OriginType: "user", ToAgentKey: "mock-agent", ToChatID: "mail-parent", Subject: "alice", RunID: "parent-run", Delivery: "started"}); err != nil {
+		t.Fatal(err)
+	}
 	session := contracts.QuerySession{RunID: "parent-run", ChatID: "mail-parent", AgentKey: "mock-agent", Subject: "alice", RunOwner: contracts.AgentRunOwner("mock-agent"), AccessLevel: "ask_for_approval"}
 	_, parent, _ := f.runs.Register(ctx, session)
 	defer f.runs.Finish(session.RunID)

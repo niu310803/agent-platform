@@ -488,6 +488,8 @@ type QuerySession struct {
 	// ProtectedPaths is the trusted platform state/credential boundary. Ordinary
 	// approvals and full_access cannot override it.
 	ProtectedPaths []string `json:"-"`
+	// CanReadChatFiles is a trusted Host-only authorization callback, never model input.
+	CanReadChatFiles func(string) bool `json:"-"`
 	// ControlReadonlyRoots protects source/configuration from ordinary mutation.
 	ControlReadonlyRoots []string `json:"-"`
 	// SkillScripts is an admission-built, memory-only grant for this run.

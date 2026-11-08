@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"agent-platform/internal/chat"
@@ -191,35 +192,108 @@ func (s *Service) verifyFiles(m Mail) error {
 }
 
 func (s *Service) replyFiles(m *Mail) error {
-	reader, ok := s.artifacts()
-	if !ok {
-		return nil
+	runs := []string{m.ReplyOfRun}
+	var children []Mail
+	if m.ParentID != "" {
+		work, err := s.Store.Get(m.ParentID)
+		if err != nil {
+			return err
+		}
+		runs, err = s.Store.WorkRuns(work)
+		if err != nil {
+			return err
+		}
+		// The completion Run can finish before its delivery row is observed.
+		found := false
+		for _, r := range runs {
+			if r == m.ReplyOfRun {
+				found = true
+			}
+		}
+		if !found {
+			runs = append(runs, m.ReplyOfRun)
+		}
+		children, err = s.Store.Children(work.ID)
+		if err != nil {
+			return err
+		}
 	}
-	items, err := reader.PublishedArtifacts(m.FromChatID)
-	if err != nil {
-		return err
-	}
-	seen := map[string]bool{}
 	files := []File{}
-	for _, a := range items {
-		if a.RunID != m.ReplyOfRun {
+	if reader, ok := s.artifacts(); ok {
+		items, err := reader.PublishedArtifacts(m.FromChatID)
+		if err != nil {
+			return err
+		}
+		// A later Run replaces a local file with the same display name.
+		positions := map[string]int{}
+		eligible := map[string]bool{}
+		for _, run := range runs {
+			eligible[run] = true
+		}
+		sort.SliceStable(items, func(i, j int) bool { return items[i].PublishedAt < items[j].PublishedAt })
+		for _, a := range items {
+			if !eligible[a.RunID] {
+				continue
+			}
+			name := filepath.Base(filepath.FromSlash(strings.TrimPrefix(a.URL, "@chat/")))
+			f := File{Name: name, Size: a.SizeBytes, SHA256: a.SHA256, Source: strings.TrimPrefix(a.URL, "@chat/")}
+			if f.SHA256 == "" {
+				legacy, e := s.prepareFiles(m.FromChatID, m.ID, []string{a.URL})
+				if e != nil {
+					return e
+				}
+				f = legacy[0]
+			}
+			key := strings.ToLower(name)
+			if i, ok := positions[key]; ok {
+				files[i] = f
+			} else {
+				positions[key] = len(files)
+				files = append(files, f)
+			}
+		}
+	}
+	seenReplies := map[string]bool{}
+	for _, c := range children {
+		parent := c.ID
+		if c.AnsweredBy != "" {
+			if a, e := s.Store.Get(c.AnsweredBy); e == nil && a.ParentID != "" {
+				parent = a.ParentID
+			}
+		}
+		replies, err := s.Store.query("KIND_='reply' AND PARENT_MAIL_ID_=? AND STATUS_='delivered'", parent)
+		if err != nil {
+			return err
+		}
+		for _, r := range replies {
+			if seenReplies[r.ID] {
+				continue
+			}
+			seenReplies[r.ID] = true
+			for _, f := range r.Files {
+				f.Source = f.Path
+				f.FromMailID = r.ID
+				files = append(files, f)
+			}
+		}
+	}
+	out := []File{}
+	hashes := map[string]bool{}
+	names := map[string]bool{}
+	for _, f := range files {
+		if hashes[f.SHA256] {
 			continue
 		}
-		name := filepath.Base(filepath.FromSlash(strings.TrimPrefix(a.URL, "@chat/")))
-		if seen[strings.ToLower(name)] {
-			return failure("mail_attachment_changed", "published attachments have duplicate names")
+		hashes[f.SHA256] = true
+		original := f.Name
+		for i := 2; names[strings.ToLower(f.Name)]; i++ {
+			ext := filepath.Ext(original)
+			f.Name = fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(original, ext), i, ext)
 		}
-		seen[strings.ToLower(name)] = true
-		file := File{Name: name, Size: a.SizeBytes, SHA256: a.SHA256, Source: strings.TrimPrefix(a.URL, "@chat/"), Path: filepath.ToSlash(filepath.Join("mail", m.ID, name))}
-		if file.SHA256 == "" {
-			legacy, e := s.prepareFiles(m.FromChatID, m.ID, []string{a.URL})
-			if e != nil {
-				return e
-			}
-			file = legacy[0]
-		}
-		files = append(files, file)
+		names[strings.ToLower(f.Name)] = true
+		f.Path = filepath.ToSlash(filepath.Join("mail", m.ID, f.Name))
+		out = append(out, f)
 	}
-	m.Files = files
+	m.Files = out
 	return nil
 }

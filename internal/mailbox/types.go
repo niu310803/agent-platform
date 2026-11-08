@@ -38,11 +38,12 @@ const (
 )
 
 type File struct {
-	Name   string `json:"name"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
-	Path   string `json:"path"`
-	Source string `json:"source,omitempty"`
+	FromMailID string `json:"fromMailId,omitempty"`
+	Name       string `json:"name"`
+	Size       int64  `json:"size"`
+	SHA256     string `json:"sha256"`
+	Path       string `json:"path"`
+	Source     string `json:"source,omitempty"`
 }
 type Mail struct {
 	RequestID        string                        `json:"requestId,omitempty"`
@@ -129,6 +130,8 @@ type Grant struct {
 	Scope       controlscope.Scope
 }
 type Target struct {
+	// AllowLaterMail lets an ordinary busy Chat receive matching mail behind unrelated queued mail.
+	AllowLaterMail bool
 	StartRunID     string
 	IgnoredOptions []string
 	RunID          string

@@ -1,3 +1,5 @@
+> 跨 Run 回传、agent_query 与同 BOT Host 文件读取的增量实施和验证状态见 [BOT 全流程方案](bot-end-to-end-review.md)。
+
 # Mailbox 与主要聊天：后续计划
 
 本文件是 Mailbox 与主要聊天唯一的后续计划，包含各阶段的实施方案。

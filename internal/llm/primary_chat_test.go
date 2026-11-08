@@ -32,7 +32,7 @@ func TestPrimaryToolDescriptionsDoNotRequireUnavailableSkillReads(t *testing.T) 
 	}
 	session := contracts.QuerySession{PrimaryChat: true, Mode: "BOT", AgentKey: "a", RunID: "r", ChatID: "c", RunOwner: contracts.AgentRunOwner("a")}
 	primary := effectiveToolDefinitions(defs, contracts.PrimaryChatTools(), session)
-	if len(primary) != 6 {
+	if len(primary) != len(contracts.PrimaryChatTools()) {
 		t.Fatalf("primary tools missing: %+v", primary)
 	}
 	for _, def := range primary {
@@ -54,7 +54,7 @@ func TestPrimaryToolDescriptionsDoNotRequireUnavailableSkillReads(t *testing.T) 
 	}
 	session.ConnectorDirs = map[string]string{"builtin.task-control": "/mounted"}
 	ordinary := effectiveToolDefinitions(defs, contracts.PrimaryChatTools(), session)
-	if len(ordinary) != 6 {
+	if len(ordinary) != len(contracts.PrimaryChatTools()) {
 		t.Fatal("ordinary tools missing")
 	}
 	for _, def := range ordinary {

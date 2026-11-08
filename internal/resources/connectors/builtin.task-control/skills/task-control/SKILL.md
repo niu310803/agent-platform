@@ -7,7 +7,7 @@ description: Manage conversations, start and follow independent Agent or Team ru
 
 Requires builtin.task-control mounted in an ordinary Native root Run. Prefer chat_send for durable correspondence and automation_manage for future execution. Use chat_send with newChat:true for independent work.
 
-The Native BOT primary Chat main lane is a Platform-owned scheduling role. It receives its six tools and the self-contained [primary Chat protocol](references/primary-chat.md) directly, without mounting this Skill or requiring a file read. Ordinary task-control Runs follow the references below. BTW/explain retain their separate read-only contract.
+The Native BOT primary Chat main lane is a Platform-owned scheduling role. It receives its seven tools and the self-contained [primary Chat protocol](references/primary-chat.md) directly, without mounting this Skill or requiring a file read. Ordinary task-control Runs follow the references below. BTW/explain retain their separate read-only contract.
 
 Automation, schedule, scheduled task, 定时任务, 计划任务 and 提醒 describe the same scheduling capability. Read [automation workflow](references/automation-workflow.md) when interpreting a scheduling request. Read [automation YAML](references/automation-yaml.md) for definition files and authorized source maintenance.
 
@@ -21,12 +21,13 @@ Tool definitions only name a capability. Read the reference for a tool before ca
 | --- | --- |
 | chat_send, chat_notify, chat_submit | [mailbox](references/mailbox.md) |
 | chat_get_status, chat_interrupt | [independent runs](references/run.md) |
-| chat_query, chat_manage | [conversations](references/chat.md) |
+| agent_query, chat_query, chat_manage | [conversations](references/chat.md) |
 | automation_query, automation_manage | [automation](references/automation.md) |
 
-- chat_send sends a durable letter to a Chat. Use newChat:true for independent work; use chatId to supplement the same work, or omit both for the target Agent primary Chat. Every consumed letter receives the complete final Run output automatically. Use plain wait for replies; mail wakes it. New mail tools remain available in mail-started root Runs and are bounded by hops.
+- chat_send sends a durable letter to a Chat. Use newChat:true for independent work; use chatId to supplement the same work, or omit both for the target Agent primary Chat. Each work receives one final reply from the Run that handles its last child result. Dispatch alone does not answer the original letter. Ordinary Agents may use plain wait, or end the Run and resume when the reply arrives. BOT primary Chats end the Run without wait. New mail tools remain available in mail-started root Runs and are bounded by hops.
 - chat_notify sends useful interim results to the opening letter sender; chat_submit answers delivered asks. Read the mailbox reference for submission shapes and approval limits.
 - chat_get_status reads the status/result of a run opened by a letter for this calling Agent and subject; chat_interrupt interrupts that run. Both take runId, not chatId. They cannot control arbitrary or current runs, or agent_invoke/agent_delegate children. Letter-started Runs cannot query or interrupt other Runs.
+- agent_query list discovers public valid Agents by key/name/description; it grants no history, invocation or Run-control rights.
 - chat_query reads conversations, visible history and artifacts, and lists selectable models. Its current action reads the current Chat; use chat_get_status to follow a launched run.
 - chat_manage renames, pins, archives, restores, forks, exports or deletes Chats. Fork copies history; it does not submit a new task. Use chat_send with its chatId to execute in the resulting Chat.
 - automation_query reads schedules and execution history or validates a candidate. automation_manage creates, updates, enables, pauses, deletes or triggers schedules. Automations remain deployment-wide resources, not isolated by Agent.

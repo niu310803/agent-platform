@@ -151,6 +151,17 @@ func (h *ToolHandler) mailStatus(args map[string]any, origin contracts.RunOrigin
 		return resultFromError(err), nil
 	}
 	result := map[string]any{"mailId": m.ID, "status": m.Status, "delivery": m.Delivery, "chatId": m.ToChatID, "evidence": m.Evidence, "error": m.Error, "answeredBy": m.AnsweredBy}
+	if m.Kind == mailbox.Letter && m.Status == mailbox.Delivered && m.AnsweredBy == "" {
+		waiting, err := h.mailbox.Store.PendingChildren(m.ID)
+		if err != nil {
+			return resultFromError(err), nil
+		}
+		if waiting > 0 {
+			result["status"] = "waiting"
+			result["pendingReplies"] = waiting
+			return mailResult(result), nil
+		}
+	}
 	if m.Delivery == "started" && m.RunID != "" {
 		if run, err := h.service.GetRunStatus(m.RunID); err == nil {
 			result["run"] = run

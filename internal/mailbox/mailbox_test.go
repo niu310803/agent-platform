@@ -224,7 +224,7 @@ func TestCompleteGroupsLettersAndIsDurablyIdempotent(t *testing.T) {
 			t.Fatalf("not answered: %#v", m)
 		}
 	}
-	if rows[0].Message != completion.AssistantText || rows[0].Hop != 3 {
+	if rows[0].Message != completion.AssistantText || rows[0].Hop != 2 {
 		t.Fatal("reply did not retain full result and causal hop")
 	}
 }

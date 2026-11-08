@@ -1,0 +1,37 @@
+name: "agent_query"
+i18n:
+  en:
+    label: "Find Agents"
+  zh-CN:
+    label: "发现智能体"
+description: "Find public valid Agents for correspondence. Read the task-control skill before use."
+clientVisible: true
+explicitOnly: true
+readOnly: true
+operationAware: true
+tags: ["platform", "management"]
+inputSchema:
+  type: "object"
+  properties:
+    action:
+      type: "string"
+      description: "Required. List public valid Agents."
+      enum: ["list"]
+    args:
+      type: "object"
+      description: "Optional search and directory pagination."
+      properties:
+        query:
+          type: "string"
+          description: "Case-insensitive substring of key, name or description."
+        limit:
+          type: "integer"
+          description: "Directory page size, default 20."
+          minimum: 1
+          maximum: 100
+        cursor:
+          type: "string"
+          description: "Previous nextCursor; continue even after an empty filtered page."
+      additionalProperties: false
+  required: ["action"]
+  additionalProperties: false
