@@ -65,9 +65,13 @@ func (t *RuntimeToolExecutor) invokeVisionRecognize(ctx context.Context, args ma
 		return result, nil
 	}
 
-	timeout := time.Duration(maxInt(profile.Timeout, 60)) * time.Second
-	callCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	// The router owns the tool deadline; a profile timeout can only shorten it.
+	callCtx := ctx
+	if profile.Timeout > 0 {
+		var cancel context.CancelFunc
+		callCtx, cancel = context.WithTimeout(ctx, time.Duration(profile.Timeout)*time.Second)
+		defer cancel()
+	}
 	content, usage, err := t.completeVisionRecognition(callCtx, model, provider, profile, outputFormat, prompt, images, toolCallAffinityKey(execCtx))
 	contentTruncated := false
 	partialContent := ""

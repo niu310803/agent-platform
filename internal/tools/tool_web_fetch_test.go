@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	neturl "net/url"
@@ -571,4 +572,62 @@ func (t routeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return t.base.RoundTrip(clone)
 	}
 	return t.base.RoundTrip(req)
+}
+
+func TestWebFetchRequestDeadlines(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		model, fetch, tool int
+	}{
+		{"default shared budget", 0, 0, 600},
+		{"custom shared budget", 0, 0, 240},
+		{"explicit shorter limits", 90, 30, 600},
+		{"limits cannot extend budget", 900, 900, 240},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := writeWebFetchRegistry(t, "https://model.test", "OPENAI")
+			cfg := defaultWebFetchTestConfig()
+			profile := cfg.Profiles["general"]
+			profile.Timeout, profile.FetchTimeout = tc.model, tc.fetch
+			cfg.Profiles["general"] = profile
+			calls := 0
+			var firstDeadline time.Time
+			client := &http.Client{Transport: imageGenerateRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls++
+				limit := tc.fetch
+				body, contentType := "<html><body>hello</body></html>", "text/html"
+				if calls == 2 {
+					limit = tc.model
+					body = `{"choices":[{"message":{"content":"summary"}}]}`
+					contentType = "application/json"
+				}
+				if limit <= 0 || limit > tc.tool {
+					limit = tc.tool
+				}
+				deadline, ok := req.Context().Deadline()
+				if !ok {
+					t.Fatal("missing deadline")
+				}
+				want := time.Duration(limit) * time.Second
+				if remaining := time.Until(deadline); remaining > want || remaining < want-time.Second {
+					t.Fatalf("call %d remaining %s want %s", calls, remaining, want)
+				}
+				if calls == 1 {
+					firstDeadline = deadline
+				} else if tc.model == 0 && tc.fetch == 0 && !deadline.Equal(firstDeadline) {
+					t.Fatal("download and model must share the same deadline")
+				}
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+			})}
+			executor := webFetchTestExecutor(cfg, registry, client)
+			execCtx := &contracts.ExecutionContext{Budget: contracts.Budget{Tool: contracts.RetryPolicy{Timeout: tc.tool}}}
+			router := &ToolRouter{}
+			result, err := router.invokeWithPolicy(context.Background(), "web_fetch", execCtx, func(ctx context.Context) (contracts.ToolExecutionResult, error) {
+				return executor.invokeWebFetch(ctx, map[string]any{"url": "https://example.com/page", "prompt": "summarize"}, execCtx)
+			})
+			if err != nil || result.Error != "" || calls != 2 {
+				t.Fatalf("calls=%d result=%#v err=%v", calls, result, err)
+			}
+		})
+	}
 }

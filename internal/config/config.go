@@ -348,7 +348,7 @@ type VisionRecognizeConfig struct {
 
 type VisionRecognizeProfileConfig struct {
 	ModelKey      string
-	Timeout       int // seconds
+	Timeout       int // seconds; <= 0 inherits the caller's tool deadline
 	MaxImages     int
 	MaxImageBytes int
 	OutputFormat  string
@@ -364,8 +364,8 @@ type WebFetchConfig struct {
 
 type WebFetchProfileConfig struct {
 	ModelKey         string
-	Timeout          int // seconds
-	FetchTimeout     int // seconds
+	Timeout          int // seconds; <= 0 inherits the caller's tool deadline
+	FetchTimeout     int // seconds; <= 0 inherits the caller's tool deadline
 	MaxURLLength     int
 	MaxResponseBytes int
 	MaxMarkdownChars int

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"agent-platform/internal/api"
 	"agent-platform/internal/config"
@@ -369,6 +371,49 @@ func TestVisionRecognizeReportsTruncatedModelOutput(t *testing.T) {
 			}
 			if tc.name == "incomplete json" && contracts.AnyStringNode(result.Structured["partialContent"]) != `{"text":"h` {
 				t.Fatalf("expected partial content diagnostics, got %#v", result.Structured)
+			}
+		})
+	}
+}
+
+func TestVisionRecognizeRequestDeadlines(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		profile, tool int
+		want          time.Duration
+	}{
+		{"inherits default budget", 0, 0, 600 * time.Second},
+		{"inherits custom budget", 0, 240, 240 * time.Second},
+		{"explicit shorter timeout", 90, 600, 90 * time.Second},
+		{"profile cannot extend budget", 900, 240, 240 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chatsDir := t.TempDir()
+			writeTestPNG(t, filepath.Join(chatsDir, "chat-deadline", "demo.png"))
+			registry := writeVisionRegistry(t, "https://vision.test", "OPENAI", models.ModelTypeVL)
+			called := false
+			client := &http.Client{Transport: imageGenerateRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				called = true
+				deadline, ok := req.Context().Deadline()
+				if !ok {
+					t.Fatal("missing deadline")
+				}
+				if remaining := time.Until(deadline); remaining > tc.want || remaining < tc.want-time.Second {
+					t.Fatalf("remaining %s, want %s", remaining, tc.want)
+				}
+				return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"image"}}]}`))}, nil
+			})}
+			executor := visionTestExecutor(chatsDir, registry, client)
+			profile := executor.cfg.VisionRecognize.Profiles["general"]
+			profile.Timeout = tc.profile
+			executor.cfg.VisionRecognize.Profiles["general"] = profile
+			execCtx := &contracts.ExecutionContext{Budget: contracts.Budget{Tool: contracts.RetryPolicy{Timeout: tc.tool}}, Request: api.QueryRequest{ChatID: "chat-deadline", References: []api.Reference{{Name: "demo.png", MimeType: "image/png"}}}}
+			router := &ToolRouter{}
+			result, err := router.invokeWithPolicy(context.Background(), "vision_recognize", execCtx, func(ctx context.Context) (contracts.ToolExecutionResult, error) {
+				return executor.invokeVisionRecognize(ctx, map[string]any{"images": []any{map[string]any{"referenceName": "demo.png"}}, "prompt": "describe"}, execCtx)
+			})
+			if err != nil || result.Error != "" || !called {
+				t.Fatalf("called=%v result=%#v err=%v", called, result, err)
 			}
 		})
 	}

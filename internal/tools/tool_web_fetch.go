@@ -84,8 +84,12 @@ func (t *RuntimeToolExecutor) invokeWebFetch(ctx context.Context, args map[strin
 	}
 
 	start := time.Now()
-	fetchCtx, cancel := context.WithTimeout(ctx, time.Duration(maxInt(profile.FetchTimeout, 60))*time.Second)
-	defer cancel()
+	fetchCtx := ctx
+	if profile.FetchTimeout > 0 {
+		var cancel context.CancelFunc
+		fetchCtx, cancel = context.WithTimeout(ctx, time.Duration(profile.FetchTimeout)*time.Second)
+		defer cancel()
+	}
 	response, redirect, err := t.fetchWebFetchContent(fetchCtx, rawURL, profile, execCtx)
 	if err != nil {
 		return modelToolError("web_fetch_request_failed", err.Error(), map[string]any{"url": rawURL}), nil
@@ -138,8 +142,12 @@ func (t *RuntimeToolExecutor) invokeWebFetch(ctx context.Context, args map[strin
 	var usage map[string]any
 	resultTruncated := false
 	if !directReturn {
-		callCtx, callCancel := context.WithTimeout(ctx, time.Duration(maxInt(profile.Timeout, 60))*time.Second)
-		defer callCancel()
+		callCtx := ctx
+		if profile.Timeout > 0 {
+			var callCancel context.CancelFunc
+			callCtx, callCancel = context.WithTimeout(ctx, time.Duration(profile.Timeout)*time.Second)
+			defer callCancel()
+		}
 		result, usage, err = t.applyWebFetchPrompt(callCtx, model, provider, profile, prompt, content, response.FinalURL, isPreapproved, truncated, toolCallAffinityKey(execCtx))
 		if errors.Is(err, errTextModelOutputTruncated) && strings.TrimSpace(result) != "" {
 			// A partial answer is still useful; return it flagged as incomplete.

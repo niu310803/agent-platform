@@ -454,12 +454,6 @@ func normalizeWebFetchConfig(cfg WebFetchConfig) WebFetchConfig {
 			continue
 		}
 		profile.ModelKey = strings.TrimSpace(profile.ModelKey)
-		if profile.Timeout <= 0 {
-			profile.Timeout = 60
-		}
-		if profile.FetchTimeout <= 0 {
-			profile.FetchTimeout = 60
-		}
 		if profile.MaxURLLength <= 0 {
 			profile.MaxURLLength = 2000
 		}
