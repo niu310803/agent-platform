@@ -9,6 +9,7 @@ import (
 	"agent-platform/internal/apperrors"
 	"agent-platform/internal/contracts"
 	"agent-platform/internal/contracts/queryinput"
+	"agent-platform/internal/runtime/controlscope"
 	runtimetypes "agent-platform/internal/runtime/types"
 )
 
@@ -41,7 +42,9 @@ func (s *Server) handleSteer(w http.ResponseWriter, r *http.Request) {
 	if !s.validateHTTPRunControl(w, r, req.RunID) {
 		return
 	}
-	result, err := s.deps.Runtime.Steer(r.Context(), runtimeSteerCommand(req))
+	// A message steer goes through Mailbox, so Runtime needs the verified control scope.
+	ctx := controlscope.WithContext(r.Context(), httpControlScope(r.Context(), ""))
+	result, err := s.deps.Runtime.Steer(ctx, runtimeSteerCommand(req))
 	if err != nil {
 		writeRuntimeControlError(w, err, http.StatusBadRequest)
 		return

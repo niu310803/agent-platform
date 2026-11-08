@@ -173,11 +173,14 @@ func (s *Service) acceptUserSend(ctx context.Context, r queryinput.SendRequest, 
 	if err != nil {
 		return mailbox.Receipt{}, err
 	}
+	// Chat ownership applies to messages that open or queue for a Run. A steer
+	// is authorized by its Run's control identity at the entry, as /api/steer
+	// always was.
 	if summary == nil || chat.IsPendingUploadChat(*summary) {
 		if strings.TrimSpace(cmd.AgentKey) == "" {
 			return mailbox.Receipt{}, &statusError{Status: 400, Message: "agentKey is required for a new Chat"}
 		}
-	} else if !s.mailChatOwned(*summary, cmd.Caller.Subject, map[string]bool{}) {
+	} else if cmd.SteerRunID == "" && !s.mailChatOwned(*summary, cmd.Caller.Subject, map[string]bool{}) {
 		return mailbox.Receipt{}, &statusError{Status: 403, Message: "Chat is not owned by this user"}
 	}
 	if cmd.ChatID != "" && summary == nil {

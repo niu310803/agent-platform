@@ -339,7 +339,8 @@ func (s *Server) wsSteer(_ context.Context, conn *ws.Conn, req ws.RequestFrame) 
 		conn.CompleteRequest(req.ID)
 		return
 	}
-	result, err := s.deps.Runtime.Steer(conn.Context(), runtimeSteerCommand(payload))
+	// A message steer goes through Mailbox, so Runtime needs the verified control scope.
+	result, err := s.deps.Runtime.Steer(controlscope.WithContext(conn.Context(), wsControlScope(conn)), runtimeSteerCommand(payload))
 	if err != nil {
 		var statusErr *statusError
 		if errors.As(err, &statusErr) {

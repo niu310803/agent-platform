@@ -229,7 +229,12 @@ func (s *Service) MessageSteer(ctx context.Context, cmd runtimetypes.SteerComman
 	}
 	// The steer passes through Mailbox under the caller's steer identity and
 	// joins only this Run; the Run's verdict is returned as /api/steer did.
-	receipt, err := s.Send(ctx, queryinput.SendRequest{RequestID: id, ChatID: status.ChatID, AgentKey: status.AgentKey, Message: cmd.Message, References: cmd.References}, runtimetypes.QueryCommand{Caller: runtimetypes.Caller{Subject: controlscope.FromContext(ctx).Subject}, SteerRunID: cmd.RunID, SteerID: steerID})
+	// The sender is the authenticated user, as for /api/query and /api/send.
+	caller := runtimetypes.Caller{}
+	if identity := runtimetypes.IdentityFromContext(ctx); identity != nil {
+		caller.Subject = identity.Subject
+	}
+	receipt, err := s.Send(ctx, queryinput.SendRequest{RequestID: id, ChatID: status.ChatID, AgentKey: status.AgentKey, Message: cmd.Message, References: cmd.References}, runtimetypes.QueryCommand{Caller: caller, SteerRunID: cmd.RunID, SteerID: steerID})
 	unmatched := runtimetypes.SteerResult{Accepted: false, Status: "unmatched", RunID: cmd.RunID, SteerID: steerID, Detail: errSteerUnmatched.Message}
 	if errors.Is(err, errSteerUnmatched) {
 		return unmatched, nil

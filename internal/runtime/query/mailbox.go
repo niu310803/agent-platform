@@ -422,7 +422,9 @@ func (s *Service) MailTarget(ctx context.Context, m mailbox.Mail) (mailbox.Targe
 	// Only this exact newly-created reservation can use that source; later
 	// user/Agent mail still requires ordinary ownership, never a source match.
 	reserved := queryinput.UserMailOrigin(m.OriginType) && frozen.MessageCreated && frozen.ChatID == m.ToChatID && frozen.AgentKey == m.ToAgentKey && frozen.Caller.Subject == m.Subject && frozen.ChatSource != "" && summary.Source == frozen.ChatSource
-	if summary.AgentKey != m.ToAgentKey || (!owned && !reserved) {
+	// A steer was authorized by its Run's control identity at the entry.
+	steer := queryinput.UserMailOrigin(m.OriginType) && frozen.SteerRunID != ""
+	if summary.AgentKey != m.ToAgentKey || (!owned && !reserved && !steer) {
 		return mailbox.Target{}, mailbox.Reject(runToolError("mail_not_owned", "target owner changed"))
 	}
 	if m.Kind == mailbox.Letter && m.OriginType == "agent" && sessionbuild.PrimaryChatEligible(def) {
