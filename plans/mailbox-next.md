@@ -5,7 +5,7 @@
 - 当前合同见 [docs/Mailbox.md](../docs/Mailbox.md)。
 - chats.db 的结构升级与 MAILS 并库暂缓，见 [chats-db-v2.md](chats-db-v2.md)。
 - 主要聊天的长上下文、分页回放与切文件见 [primary-chat-long-context.md](primary-chat-long-context.md)。
-- BOT 发现、创建、自分身、跨 BOT 与多层回信的专项复核见 [bot-end-to-end-review.md](bot-end-to-end-review.md)；其中跨 Run 回信建议尚未实施，不替代本文件已确认的合同。
+- BOT 发现、创建、自分身、跨 BOT 与多层回传的方案与复核见 [bot-end-to-end-review.md](bot-end-to-end-review.md)；其 §8 跨 Run 回传方案已确认，尚未实施，实施时按其 §8.12 同步改写本文件与 docs/Mailbox.md 的回信、插入与跳数合同。
 
 原 `chat-send-unify.md`、`mailbox-main-chat.md` 已并入本文件，讨论过程见 git 历史。本计划只覆盖 Platform 与 WebClient；Desktop 在 WebClient 定稿后对齐。
 
