@@ -22,6 +22,7 @@ const (
 	GeneralCreationPath = "agents.creation.general"
 	CoderCreationPath   = "agents.creation.coder"
 	KBaseCreationPath   = "agents.creation.kbase"
+	BotCreationPath     = "agents.creation.bot"
 )
 
 type ToolHandler struct {
@@ -52,12 +53,16 @@ func (h *ToolHandler) ToolNames() []string {
 
 func (h *ToolHandler) get(path string) contracts.ToolExecutionResult {
 	switch path {
-	case GeneralCreationPath, TeamCreationPath:
+	case GeneralCreationPath, TeamCreationPath, BotCreationPath:
 		defaults := h.cfg.GeneralSettings.DefaultAgent
 		mode := agentgeneral.Mode
 		if path == TeamCreationPath {
 			defaults = h.cfg.TeamSettings.DefaultAgent
 			mode = "TEAM"
+		}
+		if path == BotCreationPath {
+			defaults = h.cfg.BotSettings.DefaultAgent
+			mode = "BOT"
 		}
 		definition := agentgeneral.ApplyCreateDefaults(map[string]any{"mode": mode}, agentgeneral.CreateDefaults{
 			ModelKey: defaults.ModelKey, ReasoningEffort: defaults.ReasoningEffort, Budget: defaults.Budget,
@@ -97,7 +102,7 @@ func (h *ToolHandler) get(path string) contracts.ToolExecutionResult {
 			"missingFields":      missing,
 		})
 	default:
-		return errorResult("unsupported_config_path", "path must be agents.creation.general, agents.creation.coder, agents.creation.kbase or agents.creation.team")
+		return errorResult("unsupported_config_path", "path must be agents.creation.general, agents.creation.coder, agents.creation.kbase, agents.creation.team or agents.creation.bot")
 	}
 }
 

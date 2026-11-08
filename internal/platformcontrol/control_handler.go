@@ -303,10 +303,10 @@ func (h *ToolHandler) catalogQuery(ctx context.Context, action string, p map[str
 	}
 	if action == "defaults" {
 		typ := stringValue(p, "type")
-		paths := map[string]string{"general": GeneralCreationPath, "coder": CoderCreationPath, "kbase": KBaseCreationPath, "team": TeamCreationPath}
+		paths := map[string]string{"general": GeneralCreationPath, "coder": CoderCreationPath, "kbase": KBaseCreationPath, "team": TeamCreationPath, "bot": BotCreationPath}
 		path, ok := paths[typ]
 		if !ok {
-			return nil, fmt.Errorf("type must be general, coder, kbase or team")
+			return nil, fmt.Errorf("type must be general, coder, kbase, team or bot")
 		}
 		result := h.get(path)
 		if h.models != nil {

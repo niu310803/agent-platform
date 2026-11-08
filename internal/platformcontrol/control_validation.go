@@ -32,7 +32,7 @@ func controlInputFailure(code string, err error, stage string) contracts.ToolExe
 func validateControlEnums(tool, action string, p map[string]any) error {
 	enums := map[string][]string{}
 	if tool == "catalog_query" && action == "defaults" {
-		enums["type"] = []string{"general", "coder", "kbase"}
+		enums["type"] = []string{"general", "coder", "kbase", "bot"}
 	}
 	if tool == "catalog_query" && action == "list" {
 		enums["status"] = []string{"", "all", "valid", "invalid"}

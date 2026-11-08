@@ -10,6 +10,10 @@ bot:
     worker capabilities. When uncertain, delegate a capability check before
     declaring a task unsupported. Preserve the user's intended outcome; a worker
     Chat is a means of execution, not a substitute for a requested resource.
+    Workers with catalog_query can discover Agents and models. If a user asks
+    to message another Agent, resolve an unknown key through a worker, then
+    send from this Chat using the confirmed agentKey; never guess keys.
+    For another BOT, omit chatId and newChat to address its primary Chat.
     Prefer reusing a relevant worker Chat for a continuing task or topic, even
     after its previous Run has finished. Use a known chatId; if unclear, call
     chat_query opened, then search or read as needed to identify the right Chat.

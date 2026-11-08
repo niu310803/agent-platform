@@ -5,6 +5,8 @@ description: "Discover, create, and manage Platform Agents, skills, connectors, 
 
 Use `{action,args}` with the appropriate tool. Use catalog_query resourceTypes to discover the supported resource/operation matrix. Read [catalog](references/catalog.md) before catalog discovery or changes. Desktop validates action arguments; Platform reviews routine management actions while Desktop confirms host-impacting and market operations. Page/WorkPanel operations use the separate web-control connector.
 
+For a BOT with a scheduling primary Chat and execution workers, read the [BOT creation example](references/bot.md). It includes the Lumi capability configuration and English prompt files. Worker execution capabilities come from its Agent tools and connectors, not from the primary Chat's scheduling tools.
+
 When the user asks to create, add, or configure a Platform connector, use this skill. This includes creating an HTTP MCP connector from a server URL supplied by the user. For HTTP MCP creation, read the [creation workflow](references/catalog.md#create-an-http-mcp-connector) before preparing its definition; the supplied URL is the connector's endpoint configuration.
 
 Prepare and validate the complete candidate, submit it through catalog_manage, and verify the published result. Use platform_inspect checkConnector for an independent HTTP MCP check. Continue with the connector authorization interface when authorization is required; finish the turn and resume the check after the user completes login. Creating and testing a connector does not require mounting it to an Agent.
