@@ -154,7 +154,7 @@ sequenceDiagram
 - 两个创建入口都适用：`/api/admin/agents/create` 与 `catalog_query defaults {type:"bot"}` 返回的模板。catalog_manage 发布的是模型给出的完整 agent.yml，不另补默认值。
 - `@root` 表示通用根目录工作环境，不是项目目录；未填名称时不能用它作为 Agent 名称。项目意图另须具体现存 Workspace 与 isProject:true。
 - 副作用须如实说明：BOT 编辑默认开启，Workspace 为 `/` 时 chats 根目录、只读根、凭据目录与 Git 可执行配置之外的写入不经审批；它不让读取其他 Chat 的文件变方便（其他 Chat 仍按 other_chat 区域判定）。
-- 状态：工作区已有未提交的实现与测试（internal/agent/bot/create.go 等），待确认保留后再提交。
+- 状态：已随 b4120dc7 提交（internal/agent/bot/create.go 及创建入口、测试）；尚未部署验证。
 
 ## 6. 流程三：BOT 与自己的 worker 通信
 
@@ -659,7 +659,7 @@ FILES_ 的 fromMailId/sha256、waiting/approval 精确标识（适用时）：
 
 检查结果：`go test ./...` 全仓通过（包含 Server 的 HTTP/SSE 与模型请求集成测试）；`go test -race ./internal/mailbox ./internal/runtime/query ./internal/accesspolicy ./internal/runtime/session` 通过；`git diff --check` 通过。全仓初次运行曾遇到 hostenv 的 NPM 探针 3 秒超时，定向重跑与最终全仓运行均通过。另补递归读测试发现 macOS `/var` → `/private/var` 根路径需 canonical 后再比较，已修正并纳入路径回归。
 
-### 13.1 复审修复（2026-11-08，提交 37322400 之后）
+### 13.1 复审修复（2026-11-08，提交 b4120dc7）
 
 复审发现并修复：
 
