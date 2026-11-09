@@ -2,6 +2,8 @@
 
 # BOT workers use the ordinary global presets plus this section.
 bot:
+  exclude-tools:
+    - agent_invoke
   interaction-config:
     default-detail: simple
   dispatch:
@@ -39,6 +41,10 @@ preset-tools:
 # Omit or set [] to disable. Restart after changes. Platform management stays explicit.
 # Web Control and Task Control (Chat and Automation tools) are listed per mode.
 preset-connectors: []
+
+# Global and mode exclusions are additive with agent.yml toolConfig.excludeTools.
+# Explicit tools and native connector tools cannot override an exclusion.
+exclude-tools: []
 
 # planningMode tool exclusions for native GENERAL / CODER / KBASE Agents. Both lists remove tools from
 # the Agent's effective tools; neither can add a tool the Agent does not have.
@@ -80,6 +86,7 @@ general:
   interaction-config:
     default-detail: simple
   preset-tools:
+    - agent_invoke
     - action_announce
     - ask_user_question
     - artifact_publish
@@ -97,6 +104,8 @@ general:
     #   maxSteps: 200
 
 coder:
+  exclude-tools:
+    - agent_invoke
   # Default delivery/display level for existing and new Agents; agent.yml may override.
   interaction-config:
     default-detail: detailed
@@ -127,6 +136,8 @@ coder:
     file: AGENTS.md
 
 kbase:
+  exclude-tools:
+    - agent_invoke
   # Default delivery/display level for existing and new Agents; agent.yml may override.
   interaction-config:
     default-detail: simple
@@ -158,6 +169,8 @@ acp-bridges:
 
 # TEAM uses ordinary Agent capabilities plus run-scoped member delegation.
 team:
+  exclude-tools:
+    - agent_invoke
   # Default delivery/display level for existing and new Agents; agent.yml may override.
   interaction-config:
     default-detail: detailed
@@ -175,6 +188,8 @@ team:
 # it has no question or display tools and no platform connectors by default.
 # Workspace editing defaults to off; agent.yml can turn it on.
 executor:
+  exclude-tools:
+    - agent_invoke
   # Default delivery/display level for existing and new Agents; agent.yml may override.
   interaction-config:
     default-detail: simple

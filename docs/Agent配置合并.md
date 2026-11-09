@@ -29,7 +29,11 @@ BOT 主要聊天采用独立调度角色，其他所有 BOT 聊天为分身；GE
 
 完整配置位置是 `configs/agent-prompt.yml` → `primary` → `system-prompt`。该部署提示词与平台直接注入的必要调度协议分开：覆盖它不会去掉文件转交、权限代答、跳数和工具参数协议，也不授予 Skill 读取能力。六工具调度角色只作用于主 lane；BTW/explain 仍按 Agent 配置与既有只读旁路限制装配。
 
-agent-settings 顶层 preset-tools/preset-connectors 与 general/coder/kbase/team/executor 各自的同名数组相加，按名称去重并保留首次出现顺序。mode 省略或 [] 仅表示无增量，不清除全局项，因此全局列表只放所有 Native Agent（含无人值守的 EXECUTOR）都需要的能力；需要人回应或服务对话界面的 `ask_user_question`、`artifact_publish` 以及 `builtin.web-control`、`builtin.task-control` 在分发示例中列在 general/coder/kbase/team 各段，四种 mode 的有效预置与调整前相同，executor 段默认只有 `result_submit`。预置只作用于 native GENERAL/CODER/KBASE/TEAM/EXECUTOR，不写入 Agent YAML。创建、编辑、展示、装配和连接器删除保护使用相同有效预置（删除保护统计所有 mode 段的连接器）；已有显式声明不被删除。
+agent-settings 顶层 preset-tools/preset-connectors 与 general/coder/kbase/team/bot/executor 各自的同名数组相加，按名称去重并保留首次出现顺序。mode 省略或 [] 仅表示无增量，不清除全局项，因此全局列表只放所有 Native Agent（含无人值守的 EXECUTOR）都需要的能力；需要人回应或服务对话界面的 `ask_user_question`、`artifact_publish` 以及 `builtin.web-control`、`builtin.task-control` 在分发示例中列在 general/coder/kbase/team 各段，executor 段默认只有 `result_submit`。预置只作用于 native GENERAL/CODER/KBASE/TEAM/BOT/EXECUTOR，不写入 Agent YAML。创建、编辑、展示、装配和连接器删除保护使用相同有效预置（删除保护统计所有 mode 段的连接器）；已有显式声明不被删除。
+
+全局及各 Native mode 段支持 `exclude-tools`，与 Agent 的 `toolConfig.excludeTools` 合并去重；mode 省略或 `[]` 不清除全局排除。排除同时作用于预置、自身声明和已挂载的原生连接器工具，Agent 显式声明不能抵消部署排除。继承值只进入有效快照，不写入 Agent YAML；ACP、PROXY、CHANNEL 不应用这些预置与排除。BOT 主要聊天仍使用独立固定协议，mode 排除作用于工作分身等按 Agent 配置装配的会话。配置仅启动时读取，修改后需重启。
+
+分发示例仅 `general.preset-tools` 提供 `agent_invoke`，coder/kbase/team/bot/executor 通过各自 `exclude-tools` 排除；这是部署配置选择，代码不按 mode 硬编码子 Agent 调用限制。GENERAL 若作为子 Agent 或 TEAM 成员，仍需在自身 `excludeTools` 中排除 `agent_invoke`，满足既有禁止嵌套调用的目标资格约束。BOT 示例保留 Task Control 的 `automation_query`、`automation_manage`，实际调用仍受权限及审批约束。
 
 分发示例通过 `coder.preset-tools` 为普通 CODER 提供 `regex`，CODER mode profile 的缺省工具列表不再内置该工具。
 

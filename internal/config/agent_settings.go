@@ -73,7 +73,7 @@ func validatePromptTemplates(value any, path string) error {
 }
 func parseAgentPresets(values map[string]any, path string) (AgentPresets, error) {
 	var out AgentPresets
-	for _, key := range []string{"preset-tools", "preset-connectors"} {
+	for _, key := range []string{"preset-tools", "preset-connectors", "exclude-tools"} {
 		if raw, exists := values[key]; exists {
 			names, err := ParseToolNames(raw, path+"."+key)
 			if err != nil {
@@ -81,6 +81,8 @@ func parseAgentPresets(values map[string]any, path string) (AgentPresets, error)
 			}
 			if key == "preset-tools" {
 				out.Tools = names
+			} else if key == "exclude-tools" {
+				out.ExcludedTools = names
 			} else {
 				for _, id := range names {
 					if !connector.ValidID(id) {
@@ -169,7 +171,7 @@ func (c *Config) applyAgentSettingsFile(path string) error {
 		return err
 	}
 	dropRetiredPlanExecute(values, path)
-	values, err = configMap(values, path, "preset-tools", "preset-connectors", "planning-mode", "general", "coder", "kbase", "team", "bot", "executor", "proxy", "channel", "acp-bridges")
+	values, err = configMap(values, path, "preset-tools", "preset-connectors", "exclude-tools", "planning-mode", "general", "coder", "kbase", "team", "bot", "executor", "proxy", "channel", "acp-bridges")
 	if err != nil {
 		return err
 	}
@@ -178,7 +180,8 @@ func (c *Config) applyAgentSettingsFile(path string) error {
 		return err
 	}
 	c.PresetTools, c.PresetConnectors = presets.Tools, presets.Connectors
-	dispatch, err := optionalConfigMap(values, "bot", path, "dispatch", "preset-tools", "preset-connectors", "default-agent", "workspace-agents", "interaction-config")
+	c.ExcludedTools = presets.ExcludedTools
+	dispatch, err := optionalConfigMap(values, "bot", path, "dispatch", "preset-tools", "preset-connectors", "exclude-tools", "default-agent", "workspace-agents", "interaction-config")
 	if err != nil {
 		return err
 	}
@@ -201,7 +204,7 @@ func (c *Config) applyAgentSettingsFile(path string) error {
 		if !exists {
 			continue
 		}
-		keys := []string{"preset-tools", "preset-connectors", "default-agent", "workspace-agents", "interaction-config"}
+		keys := []string{"preset-tools", "preset-connectors", "exclude-tools", "default-agent", "workspace-agents", "interaction-config"}
 		if mode == "bot" {
 			keys = append(keys, "dispatch")
 		}
@@ -231,7 +234,7 @@ func (c *Config) applyAgentSettingsFile(path string) error {
 		return err
 	}
 	for _, mode := range presetModeSections {
-		keys := []string{"preset-tools", "preset-connectors", "default-agent", "workspace-agents", "interaction-config"}
+		keys := []string{"preset-tools", "preset-connectors", "exclude-tools", "default-agent", "workspace-agents", "interaction-config"}
 		if mode == "bot" {
 			keys = append(keys, "dispatch")
 		}

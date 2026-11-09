@@ -85,7 +85,7 @@ func (r *FileRegistry) PrepareAgentConnector(key, id string, enabled bool) (Agen
 	}
 	// Validate package availability and skill collisions before saving, including
 	// when runtime publication will be deferred by an active Agent lease.
-	assembler := runtimeAgentAssembler{modePresets: r.cfg.ModePresets, presetConnectors: r.cfg.PresetConnectors, connectors: connector.Sources{
+	assembler := runtimeAgentAssembler{modePresets: r.cfg.ModePresets, presetTools: r.cfg.PresetTools, presetConnectors: r.cfg.PresetConnectors, excludedTools: r.cfg.ExcludedTools, connectors: connector.Sources{
 		ExternalRoot:             r.cfg.Paths.EffectiveConnectorsCenterDir(),
 		BuiltinRoot:              r.cfg.Paths.BuiltinConnectorsDir,
 		NativeKanbanControlDir:   r.cfg.Paths.NativeKanbanControlDir,

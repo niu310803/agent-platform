@@ -20,6 +20,7 @@ type Config struct {
 
 	Export           ConversationExportConfig
 	PresetTools      []string
+	ExcludedTools    []string
 	PresetConnectors []string
 	ModePresets      map[string]AgentPresets
 	PlanningMode     PlanningModeConfig
@@ -879,7 +880,7 @@ type ACPSettingsConfig struct {
 	SourcePath string
 	ACPBridges map[string]ACPBridgeConfig
 }
-type AgentPresets struct{ Tools, Connectors []string }
+type AgentPresets struct{ Tools, Connectors, ExcludedTools []string }
 
 // PlanningModeConfig removes tools from a native Agent's effective tools for
 // the two Run forms planning creates. finalize_planning is owned by the
@@ -948,7 +949,7 @@ func (c Config) PresetsForMode(mode string) AgentPresets {
 		mode = "general"
 	}
 	p := c.ModePresets[strings.ToLower(mode)]
-	return AgentPresets{Tools: mergePresetNames(c.PresetTools, p.Tools), Connectors: mergePresetNames(c.PresetConnectors, p.Connectors)}
+	return AgentPresets{Tools: mergePresetNames(c.PresetTools, p.Tools), Connectors: mergePresetNames(c.PresetConnectors, p.Connectors), ExcludedTools: mergePresetNames(c.ExcludedTools, p.ExcludedTools)}
 }
 func mergePresetNames(groups ...[]string) []string {
 	var out []string

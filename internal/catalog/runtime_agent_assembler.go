@@ -50,6 +50,7 @@ type runtimeAgentAssembler struct {
 	modeDefaultDetails map[string]string
 	modePresets        map[string]config.AgentPresets
 	presetTools        []string
+	excludedTools      []string
 	presetConnectors   []string
 	previousAgents     map[string]AgentDefinition
 	previousAdmin      map[string]AdminAgent

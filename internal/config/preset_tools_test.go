@@ -57,3 +57,52 @@ func TestPresetConnectorsConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestToolExclusionsConfigAndMerge(t *testing.T) {
+	var cfg Config
+	body := "exclude-tools: [wait, wait]\ngeneral:\n  exclude-tools: []\ncoder:\n  exclude-tools: [bash, wait]\nbot:\n  exclude-tools: [agent_invoke]\n"
+	if err := cfg.applyAgentSettingsFile(configFixture(t, "agent-settings.yml", body)); err != nil {
+		t.Fatal(err)
+	}
+	for mode, want := range map[string][]string{
+		"GENERAL": {"wait"}, "CODER": {"wait", "bash"}, "BOT": {"wait", "agent_invoke"}, "KBASE": {"wait"},
+	} {
+		if got := cfg.PresetsForMode(mode).ExcludedTools; !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s exclusions=%v want=%v", mode, got, want)
+		}
+	}
+	for _, body := range []string{"exclude-tools: wait", "exclude-tools: null", "coder:\n  exclude-tools: [1]", "bot:\n  exclude-tools: ['']", "proxy:\n  exclude-tools: []"} {
+		if err := cfg.applyAgentSettingsFile(configFixture(t, "agent-settings.yml", body)); err == nil {
+			t.Fatalf("accepted %q", body)
+		}
+	}
+	if err := cfg.applyAgentSettingsFile(configFixture(t, "agent-settings.yml", "general: {}")); err != nil || len(cfg.ExcludedTools) != 0 {
+		t.Fatalf("stale exclusions: %v %v", cfg.ExcludedTools, err)
+	}
+}
+
+func TestShippedSettingsOnlyGeneralOffersAgentInvoke(t *testing.T) {
+	var cfg Config
+	if err := cfg.applyAgentSettingsFile(ProjectFile("configs/agent-settings.example.yml")); err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"general", "coder", "kbase", "team", "bot", "executor"} {
+		p := cfg.PresetsForMode(mode)
+		has := func(names []string, name string) bool {
+			for _, n := range names {
+				if n == name {
+					return true
+				}
+			}
+			return false
+		}
+		if has(p.Tools, "agent_invoke") != (mode == "general") || has(p.ExcludedTools, "agent_invoke") != (mode != "general") {
+			t.Fatalf("%s policy: %+v", mode, p)
+		}
+		for _, name := range []string{"automation_query", "automation_manage"} {
+			if has(p.ExcludedTools, name) {
+				t.Fatalf("%s excludes %s", mode, name)
+			}
+		}
+	}
+}

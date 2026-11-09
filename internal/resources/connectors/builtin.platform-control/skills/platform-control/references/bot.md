@@ -6,7 +6,7 @@ Use this example when the user wants a BOT with one scheduling primary Chat and 
 
 1. Call `catalog_query {action:"defaults",args:{type:"bot"}}`. Preserve the returned worker model, reasoning and budget defaults where configured. If the worker model is missing, select a real registered chat model from the returned models; never publish `example-chat-model`. Check that the model supports the selected reasoning effort.
 2. Choose an unused Agent key and the requested display name. Use `mode: BOT` with the Native engine. BOT does not support ACP, proxy routing or planning. Do not turn a requested BOT into a worker Chat of the calling Agent.
-3. Compose the candidate below, replacing key, name and model as needed. The connector mounts and exclusions are explicit example choices, not defaults for every BOT. Keep `catalog_query` and `catalog_manage` available for Platform management. `tools: []` still inherits deployment global and BOT presets; it does not mean the workers have no tools. Workspace is optional; this Lumi example uses `@root` for general host tasks, not a project directory or an access grant.
+3. Compose the candidate below, replacing key, name and model as needed. The connector mounts and Chat exclusions are explicit example choices, not defaults for every BOT. Deployment mode exclusions come from agent-settings.yml; the shipped BOT section excludes agent_invoke. Automation query and management remain available through Task Control. Keep `catalog_query` and `catalog_manage` available for Platform management. `tools: []` still inherits deployment global and BOT presets; it does not mean the workers have no tools. Workspace is optional; this Lumi example uses `@root` for general host tasks, not a project directory or an access grant.
 4. Validate and apply the complete `agent.yml` using resourceType `agent`, the chosen resourceKey, and path `agent.yml`. Use the ordinary approval policy. Do not edit the calling Agent or use files, shell or local HTTP to bypass management restrictions.
 5. Publish `SOUL.md` and `AGENTS.md` below through the same validate/apply tools with their respective paths. Each file is a separate reviewed change, not an atomic three-file transaction. Read each source and use its current baseRevision when updating an existing file. Report partial publication accurately.
 6. Read back all three sources and inspect catalog diagnostics before reporting creation. Publication alone does not verify a model request or a successful worker task. A normal new Chat is a worker; the user's scheduling Chat must be created with `primary:true` or selected through the primary-Chat management API/UI.
@@ -41,11 +41,8 @@ runtimeConfig:
   workspaceRoot: '@root'
 toolConfig:
   excludeTools:
-    - agent_invoke
     - chat_query
     - chat_manage
-    - automation_query
-    - automation_manage
   tools: []
 connectorConfig:
   connectors:

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"agent-platform/internal/api"
@@ -232,5 +233,91 @@ func TestExecutorModeTakesPresetsAndIsNeverAProject(t *testing.T) {
 	err = ValidateProjectWorkspace(map[string]any{"mode": "EXECUTOR", "runtimeConfig": map[string]any{"workspaceRoot": t.TempDir()}})
 	if err == nil {
 		t.Fatal("executor accepted as a project")
+	}
+}
+
+func TestDeploymentExclusionsApplyToDeclarationsAndNativeConnectors(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Config{
+		PresetTools:   []string{"datetime", "wait"},
+		ExcludedTools: []string{"wait"},
+		ModePresets: map[string]config.AgentPresets{
+			"bot": {ExcludedTools: []string{"agent_invoke", "chat_manage"}},
+		},
+		Paths: config.PathsConfig{AgentsDir: filepath.Join(root, "agents"), RUAgentsDir: filepath.Join(root, "ru-agents"), SkillsCenterDir: filepath.Join(root, "skills"), ConnectorsCenterDir: filepath.Join(root, "connectors")},
+	}
+	release, err := cfg.Paths.PrepareNativeConnectors()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	for _, mode := range []string{"GENERAL", "BOT"} {
+		source := "key: " + mode + "\nmode: " + mode + "\nmodelConfig:\n  modelKey: test\ntoolConfig:\n  tools: [agent_invoke, wait]\n  excludeTools: [datetime]\nconnectorConfig:\n  connectors: [builtin.task-control]\n"
+		writeRuntimeAssemblerFile(t, filepath.Join(cfg.Paths.AgentsDir, mode, "agent.yml"), source)
+	}
+	r, err := newVersionTestRegistry(t, cfg, []api.ToolDetailResponse{{Name: "datetime"}, {Name: "wait"}, {Name: "agent_invoke"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"GENERAL", "BOT"} {
+		d, ok := r.AgentDefinition(mode)
+		if !ok {
+			t.Fatalf("missing %s: %+v", mode, r.adminAgents)
+		}
+		if containsString(d.Tools, "wait") || containsString(d.Tools, "datetime") || containsString(d.Tools, "agent_invoke") != (mode == "GENERAL") || containsString(d.Tools, "chat_manage") != (mode == "GENERAL") {
+			t.Fatalf("%s tools=%v", mode, d.Tools)
+		}
+		for _, name := range []string{"automation_query", "automation_manage"} {
+			if !containsString(d.Tools, name) || !containsString(d.ConnectorNativeTools, name) {
+				t.Fatalf("%s lost %s", mode, name)
+			}
+		}
+		for _, binding := range d.EffectiveToolBindings() {
+			if binding.Name == "wait" || (mode == "BOT" && binding.Name == "chat_manage") {
+				if !binding.Excluded || binding.Active {
+					t.Fatalf("incorrect exclusion: %+v", binding)
+				}
+			}
+		}
+		files, _, err := r.EditableAgent(mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := listStrings(mapNode(files.Definition["toolConfig"])["excludeTools"]); !reflect.DeepEqual(got, []string{"datetime"}) {
+			t.Fatalf("deployment exclusions leaked to source: %v", got)
+		}
+	}
+	// Reassembly must start from declarations, including after a source edit.
+	path := filepath.Join(cfg.Paths.AgentsDir, "BOT", "agent.yml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = []byte(strings.Replace(string(data), "excludeTools: [datetime]", "excludeTools: []", 1))
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Reload(context.Background(), "agents"); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := r.AgentDefinition("BOT")
+	if !containsString(d.Tools, "datetime") || containsString(d.Tools, "wait") || containsString(d.Tools, "agent_invoke") {
+		t.Fatalf("reload tools=%v", d.Tools)
+	}
+}
+
+func TestDeploymentToolExclusionsRespectNativeModeBoundary(t *testing.T) {
+	for _, mode := range []string{"GENERAL", "CODER", "KBASE", "TEAM", "BOT", "EXECUTOR", "PROXY", "CHANNEL"} {
+		for _, engine := range []string{AgentEngineNative, AgentEngineACP} {
+			a := runtimeAgentAssembler{excludedTools: []string{"wait"}}
+			d := AgentDefinition{Mode: mode, Engine: engine, Tools: []string{"wait"}}
+			if err := a.resolveConnectors(&d); err != nil {
+				t.Fatal(err)
+			}
+			wantExcluded := engine == AgentEngineNative && mode != "PROXY" && mode != "CHANNEL"
+			if containsString(d.Tools, "wait") == wantExcluded || containsString(d.ExcludedTools, "wait") != wantExcluded {
+				t.Fatalf("%s/%s tools=%v exclusions=%v", mode, engine, d.Tools, d.ExcludedTools)
+			}
+		}
 	}
 }

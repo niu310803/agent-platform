@@ -307,7 +307,7 @@ TEAM 是普通 Agent，统一用 `agentKey` 调用，可直接回答、使用工
 
 用户消息（文字或只带引用）可经 HTTP/主 WS `/api/send` 随时投递，由平台开 Run、插入或排队，返回 mailId/chatId/delivery/runId；运行选项仅新 Run 生效。WebClient 只对 BOT 使用它；`/api/query`、`/api/steer` 同样经 mailbox，但当场投递并保留原语义，不排队。收件箱分待收取、已收件、垃圾箱，角标为待收取总数，垃圾箱只读。普通 Native 主 Agent 挂载 builtin.task-control 后使用 chat_send 派活或补充：新开会话必须 newChat:true，已有工作用 chatId，两者都省略时寄往目标主要对话。平台自动决定开 Run、插入或排队，并将完整最终结果回信；chat_notify 发中途消息，chat_submit 代答请示。chat_get_status/chat_interrupt 只控制由自己 letter started 开出的 Run，信派生 Run 保留控制链限制。默认档位通常取目标 Agent 默认；BOT 主要聊天新开自分身的省略/default 均继承受理时的父实时档位，模型与思考默认用 Agent 配置；显式具体档位高于父当前档位拒绝。BTW/explain 保留既有只读旁路合同。详情见 [Mailbox](docs/Mailbox.md)。
 
-原生连接器由 `connector.json` 的 `type: native` 和连接器 ID 对应的源码工具表装配，不使用 `native.json`。`builtin.platform-control` 提供平台治理能力；`run_env` 独立提供当前普通 native root Run 的 list/set/unset/update/explain，由通过 preset 或 Agent 显式声明挂载，分发示例列入全局 preset-tools，可通过 excludeTools 排除。动态值仅影响后续命令、不继承到子任务或其他 Run。旧 platform-control 配置段已移除。详见 [Run 环境工具](docs/Run环境工具.md)。
+原生连接器由 `connector.json` 的 `type: native` 和连接器 ID 对应的源码工具表装配，不使用 `native.json`。`builtin.platform-control` 提供平台治理能力；`run_env` 独立提供当前普通 native root Run 的 list/set/unset/update/explain，由通过 preset 或 Agent 显式声明挂载，分发示例列入全局 preset-tools，可通过 agent-settings.yml 全局/mode `exclude-tools` 或 Agent `excludeTools` 排除。动态值仅影响后续命令、不继承到子任务或其他 Run。旧 platform-control 配置段已移除。详见 [Run 环境工具](docs/Run环境工具.md)。
 
 五个内嵌原生连接器 platform-control/task-control/kanban-control/kbase-control/web-control 统一从 `0.4.0` 开始使用 Platform 版本系列，发布时统一维护源码清单版本；外部 dbx/httpx 保持独立项目版本。详见 [内嵌连接器来源](docs/连接器.md#desktop-内嵌连接器来源)。
 

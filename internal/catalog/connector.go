@@ -91,7 +91,12 @@ func parseConnectorIDs(value any) ([]string, error) {
 }
 
 func (a *runtimeAgentAssembler) resolveConnectors(def *AgentDefinition) error {
-	presets := (config.Config{PresetTools: a.presetTools, PresetConnectors: a.presetConnectors, ModePresets: a.modePresets}).PresetsForMode(def.Mode)
+	presets := (config.Config{PresetTools: a.presetTools, PresetConnectors: a.presetConnectors, ExcludedTools: a.excludedTools, ModePresets: a.modePresets}).PresetsForMode(def.Mode)
+	if def.Engine != AgentEngineACP && presetMode(def.Mode) {
+		// Deployment exclusions also apply to explicit declarations and native
+		// connector tools. Only the execution snapshot receives inherited values.
+		def.ExcludedTools = mergeToolExclusions(presets.ExcludedTools, def.ExcludedTools)
+	}
 	def.applyPresetTools(presets.Tools)
 	def.Connectors = mergePresetConnectors(*def, presets.Connectors)
 	return resolveConnectorPackages(def, func(id string) (connector.Package, error) {

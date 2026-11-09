@@ -9,6 +9,20 @@ import (
 	"agent-platform/internal/contracts"
 )
 
+func mergeToolExclusions(groups ...[]string) []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, group := range groups {
+		for _, name := range group {
+			if !seen[name] {
+				names = append(names, name)
+				seen[name] = true
+			}
+		}
+	}
+	return names
+}
+
 func validatePresetTools(names []string, definitions []api.ToolDetailResponse) error {
 	registered := map[string]bool{}
 	for _, def := range definitions {
