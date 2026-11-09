@@ -24,6 +24,7 @@ type Service struct {
 	ControlReceipts *operationstate.Receipts[ControlReceipt] // fork/export outcomes for this process
 	controlMutation sync.Mutex
 	mutationOwner   *Service
+	voicePending    map[string]int // protected by the shared mutation lock
 	Chats           chat.Store
 	Archives        *chat.ArchiveStore
 	Archiver        *chat.Archiver
@@ -38,6 +39,16 @@ func NewService(chats chat.Store, archives *chat.ArchiveStore, archiver *chat.Ar
 // DeleteChat reports only the Chat deletion. Mail cleanup is best effort: the
 // Chat is already gone; mail cleanup errors must not undo that mutation.
 func (s *Service) DeleteChat(chatID string) error {
+	release := s.LockMutation()
+	defer release()
+	return s.DeleteChatLocked(chatID)
+}
+
+// DeleteChatLocked is for callers already holding LockMutation for preflight.
+func (s *Service) DeleteChatLocked(chatID string) error {
+	if err := s.ensureNoVoiceUsage(chatID); err != nil {
+		return err
+	}
 	if err := s.Chats.DeleteChat(chatID); err != nil {
 		return err
 	}
@@ -156,6 +167,11 @@ func (s *Service) archiveChats(chatIDs []string) ([]ArchiveResult, error) {
 			continue
 		}
 		if err := s.EnsureNoActiveRun(chatID); err != nil {
+			result.Error = err.Error()
+			results = append(results, result)
+			continue
+		}
+		if err := s.ensureNoVoiceUsage(chatID); err != nil {
 			result.Error = err.Error()
 			results = append(results, result)
 			continue

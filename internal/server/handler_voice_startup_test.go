@@ -14,7 +14,7 @@ func TestVoiceSlowASRStartupPreservesBufferedAudio(t *testing.T) {
 	provider.startDelay.Store(int64(3 * time.Second))
 	provider.transcript.Store("")
 	c, chatID := dialVoice(t, srv, "", 16000)
-	if err := c.WriteJSON(map[string]any{"type": "listen", "state": "start", "mode": "manual"}); err != nil {
+	if err := startVoice(t, c); err != nil {
 		t.Fatal(err)
 	}
 	// Record 2.5 seconds while ASR startup is delayed for 3 seconds. The old
@@ -28,7 +28,7 @@ func TestVoiceSlowASRStartupPreservesBufferedAudio(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := c.WriteJSON(map[string]any{"type": "listen", "state": "stop", "mode": "manual"}); err != nil {
+	if err := stopVoice(c); err != nil {
 		t.Fatal(err)
 	}
 	msg, _ := voiceUntil(t, c, "stt", "")

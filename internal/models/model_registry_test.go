@@ -2,11 +2,33 @@ package models
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestDurationPricingRejectsMixedUnitsAndNonFinitePrices(t *testing.T) {
+	for _, pricing := range []ModelPricing{
+		{Unit: PricingUnitPerSecond},
+		{Unit: PricingUnitPerSecond, Seconds: -1},
+		{Unit: PricingUnitPerSecond, Seconds: math.NaN()},
+		{Unit: PricingUnitPerSecond, Seconds: math.Inf(1)},
+		{Unit: PricingUnitPerSecond, Seconds: 1, Characters: 1},
+		{Unit: PricingUnitPerSecond, Seconds: 1, InputCacheMiss: -1},
+		{Unit: PricingUnitPer10KCharacters, Characters: 1, Seconds: 1},
+		{Seconds: 1},
+		{InputCacheMiss: 1},
+	} {
+		if ValidateModelPricing(pricing, ModelTypeASR) == nil {
+			t.Fatalf("invalid duration pricing accepted: %+v", pricing)
+		}
+	}
+	if err := ValidateModelPricing(ModelPricing{Unit: PricingUnitPerSecond, Seconds: 1}, ModelTypeTTS); err == nil {
+		t.Fatal("duration pricing assigned to TTS")
+	}
+}
 
 func TestRerankerModelIsNotANativeChatModel(t *testing.T) {
 	root := t.TempDir()

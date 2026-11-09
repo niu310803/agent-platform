@@ -36,6 +36,7 @@ type Backend interface {
 	PrepareRunStart(context.Context, contracts.RunStartRequest) (contracts.RunStartPlan, error)
 	RunStatus(string) (contracts.RunSnapshot, error)
 	AttachRun(context.Context, runtimetypes.RunRef, int64) (*runtimetypes.Subscription, error)
+	UpdateQuestionDraft(context.Context, runtimetypes.QuestionDraftCommand) (*queryinput.QuestionDraft, error)
 	Submit(context.Context, runtimetypes.SubmitCommand) (runtimetypes.SubmitResult, error)
 	Steer(context.Context, runtimetypes.SteerCommand) (runtimetypes.SteerResult, error)
 	Interrupt(context.Context, runtimetypes.InterruptCommand) (runtimetypes.InterruptResult, error)
@@ -191,6 +192,14 @@ func (s *Service) AttachRun(ctx context.Context, ref runtimetypes.RunRef, afterS
 	return backend.AttachRun(ctx, ref, afterSeq)
 }
 
+func (s *Service) UpdateQuestionDraft(ctx context.Context, command runtimetypes.QuestionDraftCommand) (*queryinput.QuestionDraft, error) {
+	backend, err := s.current()
+	if err != nil {
+		return nil, err
+	}
+	return backend.UpdateQuestionDraft(ctx, command)
+}
+
 func (s *Service) Submit(ctx context.Context, command runtimetypes.SubmitCommand) (runtimetypes.SubmitResult, error) {
 	backend, err := s.current()
 	if err != nil {
@@ -204,7 +213,7 @@ func (s *Service) Steer(ctx context.Context, command runtimetypes.SteerCommand) 
 	if err != nil {
 		return runtimetypes.SteerResult{}, err
 	}
-	if command.AgentCaller == nil && (strings.TrimSpace(command.Message) != "" || len(command.References) > 0) {
+	if command.AgentCaller == nil && controlscope.FromContext(ctx).Transport != "voice" && (strings.TrimSpace(command.Message) != "" || len(command.References) > 0) {
 		return backend.MessageSteer(ctx, command)
 	}
 	return backend.Steer(ctx, command)

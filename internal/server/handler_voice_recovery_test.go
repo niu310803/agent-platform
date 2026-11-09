@@ -11,6 +11,7 @@ import (
 	"agent-platform/internal/chat"
 	rt "agent-platform/internal/runtime/types"
 	"agent-platform/internal/voice"
+	"github.com/gorilla/websocket"
 )
 
 type voiceFailingSummary struct {
@@ -43,15 +44,20 @@ func TestVoiceSummaryFailureEndsTurnAndAllowsNextQuery(t *testing.T) {
 		t.Run(map[bool]string{false: "before_query", true: "after_run"}[afterRun], func(t *testing.T) {
 			f := newTestFixture(t)
 			chats := &voiceFailingSummary{ChatReader: f.chats.(voice.ChatReader)}
-			runtime := &voiceSummaryAfterRun{Runtime: f.server.deps.Runtime, chats: chats}
+			runtime := &voiceSummaryAfterRun{Runtime: f.server.deps.Runtime.(voice.Runtime), chats: chats}
 			srv, _ := enableVoiceFixtureWithChats(t, f, runtime, chats)
 			c, chatID := dialVoice(t, srv, "", 16000)
 			if afterRun {
 				runtime.fail.Store(true)
+				speakVoice(t, c)
 			} else {
-				chats.fail.Store(true)
+				if err := startVoice(t, c); err != nil {
+					t.Fatal(err)
+				}
+				chats.fail.Store(true) // Admission read fails after the ready boundary.
+				_ = c.WriteMessage(websocket.BinaryMessage, make([]byte, 640))
+				_ = stopVoice(c)
 			}
-			speakVoice(t, c)
 			for {
 				msg, _ := readVoice(t, c)
 				if msg["type"] == "error" {
@@ -63,7 +69,7 @@ func TestVoiceSummaryFailureEndsTurnAndAllowsNextQuery(t *testing.T) {
 			}
 			speakVoice(t, c)
 			start, _ := voiceUntil(t, c, "run", "start")
-			if start["turn"] != float64(2) {
+			if start["runId"] == "" || start["turn"] != nil {
 				t.Fatal(start)
 			}
 			voiceUntil(t, c, "tts", "stop")
@@ -100,7 +106,7 @@ func TestVoiceInterruptFailureCanRetry(t *testing.T) {
 			defer close(engine.first.release)
 			f.server.deps.Agent = engine
 			bindTestRuntime(f.server)
-			runtime := &voiceRetryInterruptRuntime{Runtime: f.server.deps.Runtime, entered: make(chan struct{}), fail: make(chan struct{})}
+			runtime := &voiceRetryInterruptRuntime{Runtime: f.server.deps.Runtime.(voice.Runtime), entered: make(chan struct{}), fail: make(chan struct{})}
 			srv, _ := enableVoiceFixture(t, f, runtime)
 			var release sync.Once
 			defer release.Do(func() { close(runtime.fail) })
@@ -128,7 +134,7 @@ func TestVoiceInterruptFailureCanRetry(t *testing.T) {
 			}
 			release.Do(func() { close(runtime.fail) })
 			if !pending {
-				_ = c.WriteJSON(map[string]any{"type": "listen", "state": "start", "mode": "manual"})
+				_ = startVoice(t, c)
 			}
 			msg, _ := readVoice(t, c)
 			if msg["type"] != "error" || msg["code"] != "run_failed" || msg["turn"] != float64(2) {
@@ -138,7 +144,7 @@ func TestVoiceInterruptFailureCanRetry(t *testing.T) {
 			voiceUntil(t, c, "abort", "")
 			speakVoice(t, c)
 			start, _ := voiceUntil(t, c, "run", "start")
-			if start["turn"] != float64(3) {
+			if start["runId"] == "" || start["turn"] != nil {
 				t.Fatal(start)
 			}
 			voiceUntil(t, c, "tts", "stop")

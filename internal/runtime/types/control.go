@@ -66,6 +66,12 @@ type SubmitCommand struct {
 	ContinuationState any
 }
 
+type QuestionDraftCommand struct {
+	RunRef
+	AwaitingID string
+	Answer     map[string]any
+}
+
 type SubmitResult struct {
 	Accepted   bool
 	Status     string
