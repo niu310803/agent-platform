@@ -16,6 +16,7 @@ import (
 	"agent-platform/internal/catalog"
 	"agent-platform/internal/chat"
 	"agent-platform/internal/contracts"
+	"agent-platform/internal/conversation"
 	"agent-platform/internal/i18n"
 	"agent-platform/internal/observability"
 	"agent-platform/internal/timecontract"
@@ -689,6 +690,8 @@ func (s *Server) wsFeedback(_ context.Context, conn *ws.Conn, req ws.RequestFram
 }
 
 func (s *Server) wsChatDelete(_ context.Context, conn *ws.Conn, req ws.RequestFrame) {
+	release := s.conversationService().LockMutation()
+	defer release()
 	payload, err := ws.DecodePayload[api.DeleteChatRequest](req)
 	if err != nil {
 		conn.SendError(req.ID, "invalid_request", 400, "invalid payload", nil)
@@ -720,8 +723,12 @@ func (s *Server) wsChatDelete(_ context.Context, conn *ws.Conn, req ws.RequestFr
 			return
 		}
 	}
-	if err := s.deps.Chats.DeleteChat(chatID); errors.Is(err, chat.ErrChatNotFound) {
+	if err := s.conversationService().DeleteChatLocked(chatID); errors.Is(err, chat.ErrChatNotFound) {
 		conn.SendError(req.ID, "not_found", 404, "chat not found", nil)
+		conn.CompleteRequest(req.ID)
+		return
+	} else if errors.Is(err, conversation.ErrVoiceUsagePending) {
+		conn.SendError(req.ID, "voice_usage_pending", 409, err.Error(), nil)
 		conn.CompleteRequest(req.ID)
 		return
 	} else if err != nil {

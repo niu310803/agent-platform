@@ -1,12 +1,15 @@
 package contracts
 
 import (
+	"errors"
 	"fmt"
 
 	"agent-platform/internal/api"
 )
 
 const PlanningSuperseded = "planning_superseded"
+
+var ErrSteerAwaitingPending = errors.New("run has an awaiting item")
 
 // ExpectPlanningSubmit closes the race between checking queued steers and
 // registering a confirmation. False means the producer must resolve the wait

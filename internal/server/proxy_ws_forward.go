@@ -32,6 +32,9 @@ func (s *Server) forwardProxySubmit(req api.SubmitRequest) (api.SubmitResponse, 
 	if strings.TrimSpace(req.AgentKey) != strings.TrimSpace(route.AgentKey) {
 		return api.SubmitResponse{}, &statusError{Status: http.StatusForbidden, Message: "agentKey does not match run"}, true
 	}
+	if req.RequireVoiceQuestion {
+		return api.SubmitResponse{Status: "unsupported", RunID: req.RunID, AwaitingID: req.AwaitingID, SubmitID: req.SubmitID, Detail: "voice question submission is unavailable for remote runs"}, nil, true
+	}
 	if route.Transport == "sse" {
 		var response api.SubmitResponse
 		body := map[string]any{
@@ -187,6 +190,11 @@ func (s *Server) forwardProxySteer(req api.SteerRequest) (api.SteerResponse, *st
 	steerID := strings.TrimSpace(req.SteerID)
 	if steerID == "" {
 		steerID = time.Now().UTC().Format("20060102150405.000000000")
+	}
+	// The upstream ordinary control protocol has no atomic no-awaiting guard.
+	// Do not silently drop the trusted media constraint when forwarding.
+	if req.RequireNoAwaiting {
+		return api.SteerResponse{Status: "unsupported", RunID: req.RunID, SteerID: steerID, Detail: "voice steer is unavailable for remote runs"}, nil, true
 	}
 	if len(req.References) > 0 {
 		return api.SteerResponse{Accepted: false, Status: "unsupported", RunID: req.RunID, SteerID: steerID, Detail: "attachment steer is not supported for remote runs"}, nil, true

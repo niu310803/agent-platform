@@ -9,14 +9,20 @@ import (
 	"agent-platform/internal/chat"
 	"agent-platform/internal/config"
 	"agent-platform/internal/contracts"
+	"agent-platform/internal/contracts/queryinput"
 	"agent-platform/internal/models"
+	"agent-platform/internal/modelusage"
 	rt "agent-platform/internal/runtime/types"
 	"github.com/gorilla/websocket"
 )
 
 type Runtime interface {
+	UpdateQuestionDraft(context.Context, rt.QuestionDraftCommand) (*queryinput.QuestionDraft, error)
+	Submit(context.Context, rt.SubmitCommand) (rt.SubmitResult, error)
+	GetRunStatus(string) (contracts.RunSnapshot, error)
 	ExecuteQueryWithHooks(context.Context, rt.QueryCommand, rt.QueryHooks) (rt.QueryResult, error)
 	AttachRun(context.Context, rt.RunRef, int64) (*rt.Subscription, error)
+	Steer(context.Context, rt.SteerCommand) (rt.SteerResult, error)
 	Interrupt(context.Context, rt.InterruptCommand) (rt.InterruptResult, error)
 }
 
@@ -25,7 +31,14 @@ type ChatReader interface {
 	PrimaryChatID(string) (string, error)
 }
 
+type UsageWriter interface {
+	BeginVoiceUsage(string) (func(error), error)
+	AppendVoiceUsage(string, chat.VoiceUsage) (bool, error)
+}
+
 type Dependencies struct {
+	Billing config.BillingConfig
+	Usage   UsageWriter
 	Config  config.VoiceConfig
 	Models  *models.ModelRegistry
 	Runtime Runtime
@@ -79,7 +92,7 @@ func (s *Service) readiness() string {
 	if s == nil || !s.deps.Config.Enabled {
 		return "voice_disabled"
 	}
-	if s.ctx.Err() != nil || s.deps.Runtime == nil || s.deps.Chats == nil || s.deps.Agents == nil || s.deps.Runs == nil {
+	if s.ctx.Err() != nil || s.deps.Runtime == nil || s.deps.Usage == nil || s.deps.Chats == nil || s.deps.Agents == nil || s.deps.Runs == nil {
 		return "voice_unavailable"
 	}
 	a, ap, t, tp, err := s.speechModels()
@@ -108,6 +121,8 @@ func (s *Service) speechModels() (models.ModelDefinition, models.ProviderDefinit
 	if err == nil && (a.Protocol != models.ProtocolDashScopeASR || t.Protocol != models.ProtocolDashScopeRealtimeTTS || !ap.HasCredential() || !tp.HasCredential()) {
 		err = errors.New("voice model capability unavailable")
 	}
+	a.Pricing.Currency = modelusage.PricingCurrency(a.Pricing, s.deps.Billing.Currency)
+	t.Pricing.Currency = modelusage.PricingCurrency(t.Pricing, s.deps.Billing.Currency)
 	return a, ap, t, tp, err
 }
 
@@ -121,10 +136,36 @@ func (s *Service) Capabilities() map[string]any {
 			voices = append(voices, map[string]string{"id": id, "label": id})
 		}
 	}
-	return map[string]any{"enabled": reason == "", "reason": reason, "version": 1, "websocketPath": "/api/voice/ws",
-		"input":  map[string]any{"codecs": []string{"pcm_s16le"}, "sampleRate": 16000, "channels": 1},
+	inputCodecs := []string{"pcm_s16le"}
+	if reason == "" && s.opusInputSupported() {
+		inputCodecs = append(inputCodecs, "opus")
+	}
+	return map[string]any{"enabled": reason == "", "reason": reason, "version": 2, "websocketPath": "/api/voice/ws",
+		"input":  map[string]any{"codecs": inputCodecs, "sampleRate": 16000, "channels": 1},
 		"output": map[string]any{"codecs": []string{"pcm_s16le"}, "sampleRates": []int{16000, 24000}},
 		"voices": voices, "defaultVoice": defaultVoice}
+}
+
+func (s *Service) opusInputSupported() bool {
+	if s == nil {
+		return false
+	}
+	model, _, _, _, err := s.speechModels()
+	return err == nil && model.ModelID == "paraformer-realtime-v2"
+}
+
+// Keep the negotiated model for a media connection, but freeze its current
+// registry price separately for each provider task, including actual retries.
+func (s *Service) taskPricing(model models.ModelDefinition) func() (models.ModelPricing, error) {
+	return func() (models.ModelPricing, error) {
+		current, err := s.deps.Models.GetModel(model.Key)
+		if err != nil || current.Provider != model.Provider || current.ModelID != model.ModelID || current.Type != model.Type || current.Protocol != model.Protocol {
+			return models.ModelPricing{}, errors.New("voice model changed; reconnect required")
+		}
+		pricing := current.Pricing
+		pricing.Currency = modelusage.PricingCurrency(pricing, s.deps.Billing.Currency)
+		return pricing, nil
+	}
 }
 
 type Caller struct {

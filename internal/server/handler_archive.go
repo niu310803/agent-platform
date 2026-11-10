@@ -182,6 +182,21 @@ func (s *Server) restoreArchives(chatIDs []string) (api.ArchiveRestoreResponse, 
 		mapped := api.ArchiveRestoreResult{ChatID: result.ChatID, Success: result.Success, Error: result.Error}
 		if result.Summary != nil {
 			apiSummary := mapChatSummaries([]chat.Summary{*result.Summary})[0]
+			detail, readErr := s.deps.Chats.LoadChat(result.ChatID)
+			if readErr != nil {
+				return api.ArchiveRestoreResponse{}, readErr
+			}
+			runs, readErr := s.deps.Chats.ListRuns(result.ChatID)
+			if readErr != nil {
+				return api.ArchiveRestoreResponse{}, readErr
+			}
+			usage, readErr := chatUsageBreakdown(result.Summary.Usage, runs, detail.ReplayUsage)
+			if readErr != nil {
+				return api.ArchiveRestoreResponse{}, readErr
+			}
+			if usage != nil {
+				apiSummary.Usage = usage.Chat
+			}
 			mapped.Summary = &apiSummary
 			s.broadcast("archive.restored", map[string]any{"chatId": result.ChatID, "agentKey": result.Summary.AgentKey, "summary": apiSummary})
 		}
@@ -197,7 +212,19 @@ func (s *Server) listArchives(req api.ArchivesRequest) (api.ArchivesResponse, er
 	}
 	response := api.ArchivesResponse{Total: total, Items: make([]api.ArchivedSummaryResponse, 0, len(items))}
 	for _, item := range items {
-		response.Items = append(response.Items, mapArchivedSummary(item))
+		archived, err := s.conversationService().LoadArchive(item.ChatID)
+		if err != nil {
+			return api.ArchivesResponse{}, err
+		}
+		usage, err := chatUsageBreakdown(item.Usage, archived.Runs, archived.Detail.ReplayUsage)
+		if err != nil {
+			return api.ArchivesResponse{}, err
+		}
+		mapped := mapArchivedSummary(item)
+		if usage != nil {
+			mapped.Usage = usage.Chat
+		}
+		response.Items = append(response.Items, mapped)
 	}
 	return response, nil
 }
@@ -220,7 +247,11 @@ func (s *Server) loadArchiveDetail(ctx context.Context, chatID string, includeRa
 		Runs:                        make([]api.RunSummary, 0, len(archived.Runs)),
 	}
 	for _, run := range archived.Runs {
-		response.Runs = append(response.Runs, mapRunSummary(run))
+		mapped, err := mapRunSummary(run, archived.Detail.ReplayUsage.VoiceByRun[run.RunID])
+		if err != nil {
+			return api.ArchivedChatDetailResponse{}, err
+		}
+		response.Runs = append(response.Runs, mapped)
 	}
 	if principal := PrincipalFromContext(ctx); principal != nil {
 		response.ResourceTicket = s.ticketService.Issue(principal.Subject, archived.Detail.ChatID)
@@ -234,9 +265,12 @@ func (s *Server) loadArchiveDetail(ctx context.Context, chatID string, includeRa
 	if archived.Detail.Artifact != nil {
 		response.Artifact = archived.Detail.Artifact
 	}
-	response.Usage = mapUsageDataPtr(archived.Summary.Usage)
-	if usage := latestChatUsageFromEvents(archived.Detail.Events); usage != nil {
-		response.Usage = usage
+	usage, err := chatUsageBreakdown(archived.Summary.Usage, archived.Runs, archived.Detail.ReplayUsage)
+	if err != nil {
+		return api.ArchivedChatDetailResponse{}, err
+	}
+	if usage != nil {
+		response.Usage = usage.Chat
 	}
 	return response, nil
 }
@@ -295,7 +329,7 @@ func mapArchivedSummary(item chat.ArchivedSummary) api.ArchivedSummaryResponse {
 	return resp
 }
 
-func mapRunSummary(run chat.RunSummary) api.RunSummary {
+func mapRunSummary(run chat.RunSummary, voice chat.VoiceUsageTotals) (api.RunSummary, error) {
 	usage := run.Usage
 	usage.ModelKey = ""
 	response := api.RunSummary{
@@ -317,7 +351,12 @@ func mapRunSummary(run chat.RunSummary) api.RunSummary {
 		completedAt := run.CompletedAt
 		response.CompletedAt = &completedAt
 	}
-	return response
+	merged, err := mergeVoiceUsage(&response.Usage, voice)
+	if err != nil {
+		return api.RunSummary{}, err
+	}
+	response.Usage = *merged
+	return response, nil
 }
 
 func (s *Server) wsChatArchive(_ context.Context, conn *ws.Conn, req ws.RequestFrame) {

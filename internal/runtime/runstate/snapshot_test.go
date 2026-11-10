@@ -36,8 +36,26 @@ func TestSnapshotAwaitingSummarySurvivesEventEviction(t *testing.T) {
 	}
 	control.TransitionState(contracts.RunLoopStateModelStreaming)
 	snapshot, _ := Snapshot(manager, nil, "r")
+	if snapshot.AwaitingCount != 2 {
+		t.Fatal("loop phase hid registered waiters", snapshot)
+	}
+	control.ClearExpectedSubmit("a")
+	control.ClearExpectedSubmit("b")
+	snapshot, _ = Snapshot(manager, nil, "r")
 	if snapshot.Awaiting != nil || snapshot.AwaitingCount != 0 {
 		t.Fatalf("stale awaiting: %#v", snapshot)
+	}
+}
+
+func TestSnapshotExposesRegisteredQuestionBeforeBlockingWait(t *testing.T) {
+	manager := NewManager()
+	_, control, _ := manager.Register(context.Background(), contracts.QuerySession{RunID: "r", ChatID: "c"})
+	defer control.Finish()
+	control.TransitionState(contracts.RunLoopStateToolExecuting)
+	control.ExpectSubmit(contracts.AwaitingSubmitContext{AwaitingID: "a", Mode: "question", Questions: []any{map[string]any{"id": "q", "type": "text"}}})
+	snapshot, err := Snapshot(manager, nil, "r")
+	if err != nil || snapshot.AwaitingCount != 1 || snapshot.Awaiting == nil || snapshot.Awaiting.AwaitingID != "a" {
+		t.Fatal(snapshot, err)
 	}
 }
 

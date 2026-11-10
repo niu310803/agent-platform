@@ -7,16 +7,24 @@ import (
 	"agent-platform/internal/apperrors"
 	"agent-platform/internal/contracts"
 	"agent-platform/internal/contracts/queryinput"
+	"agent-platform/internal/runtime/controlscope"
 	runtimetypes "agent-platform/internal/runtime/types"
 )
 
-func (s *Service) Submit(_ context.Context, command runtimetypes.SubmitCommand) (runtimetypes.SubmitResult, error) {
+func (s *Service) Submit(ctx context.Context, command runtimetypes.SubmitCommand) (runtimetypes.SubmitResult, error) {
 	if strings.TrimSpace(command.RunID) == "" || strings.TrimSpace(command.AwaitingID) == "" {
 		return runtimetypes.SubmitResult{}, apperrors.New(apperrors.CodeInvalidRequest, "runId and awaitingId are required")
 	}
 
+	if controlscope.FromContext(ctx).Transport == "voice" {
+		if err := s.validateVoiceQuestionSubmit(ctx, command); err != nil {
+			return runtimetypes.SubmitResult{}, err
+		}
+	}
+
 	req := queryinput.SubmitRequest{
-		ChatID: command.ChatID, RunID: command.RunID, AgentKey: command.AgentKey,
+		RequireVoiceQuestion: controlscope.FromContext(ctx).Transport == "voice",
+		ChatID:               command.ChatID, RunID: command.RunID, AgentKey: command.AgentKey,
 		AwaitingID: command.AwaitingID, SubmitID: command.SubmitID, Locale: command.Locale,
 		Param: queryinput.SubmitParam(command.Param), Params: queryinput.SubmitParams(command.Params), ContinuationRunID: command.ContinuationRunID,
 		ContinuationState: command.ContinuationState,
@@ -46,7 +54,8 @@ func (s *Service) Steer(ctx context.Context, command runtimetypes.SteerCommand) 
 	req := queryinput.SteerRequest{
 		RequestID: command.RequestID, ChatID: command.ChatID, RunID: command.RunID,
 		SteerID: command.SteerID, AgentKey: command.AgentKey, Message: command.Message,
-		References: command.References,
+		References:        command.References,
+		RequireNoAwaiting: controlscope.FromContext(ctx).Transport == "voice",
 	}
 	if statusErr := s.ValidateRunOwner(req.RunID, req.AgentKey); statusErr != nil {
 		return runtimetypes.SteerResult{}, statusErr

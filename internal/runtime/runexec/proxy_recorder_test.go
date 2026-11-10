@@ -2,8 +2,10 @@ package runexec
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"agent-platform/internal/catalog"
 	"agent-platform/internal/chat"
@@ -239,6 +241,38 @@ func TestProxyOpaqueActivitySurvivesBothLevelsAndAttachWithoutClassification(t *
 			default:
 				t.Fatalf("%s missing attach message %q", detail, message)
 			}
+		}
+	}
+}
+
+type timingCompletionStore struct {
+	chat.Store
+	fail       bool
+	returnedAt time.Time
+}
+
+func (s *timingCompletionStore) OnRunCompleted(chat.RunCompletion) error {
+	s.returnedAt = time.Now()
+	if s.fail {
+		return errors.New("fixture storage failure")
+	}
+	return nil
+}
+func TestProxyPersistenceClockFollowsStorageAcknowledgement(t *testing.T) {
+	for _, failure := range []bool{false, true} {
+		store := &timingCompletionStore{fail: failure}
+		r := &ProxyEventRecorder{req: runtimetypes.QueryCommand{ChatID: "chat", RunID: "run"}, chatStore: store, startedAt: time.Now().UnixMilli()}
+		ok, completion := r.Finish()
+		result := r.Result(completion)
+		if ok == failure {
+			t.Fatal("wrong persistence outcome")
+		}
+		if failure {
+			if !result.PersistedAt.IsZero() {
+				t.Fatal("failure got success timestamp")
+			}
+		} else if result.PersistedAt.Before(store.returnedAt) || result.PersistedAt.After(time.Now()) {
+			t.Fatal("wrong persistence boundary", result.PersistedAt)
 		}
 	}
 }

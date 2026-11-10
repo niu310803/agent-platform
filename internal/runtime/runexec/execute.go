@@ -45,6 +45,7 @@ type ExecuteOptions struct {
 // Result is the single final result source for both waiting and detached calls.
 // Completion is exactly the record passed to persistence, including failures.
 type Result struct {
+	PersistedAt  time.Time
 	Completion   chat.RunCompletion
 	Persisted    bool
 	Continuation *contracts.DeltaRunContinuation
@@ -64,7 +65,11 @@ func Execute(params ExecuteOptions) (result Result) {
 		if params.StepWriter != nil {
 			params.StepWriter.Flush()
 		}
-		return params.PersistCompletion(text, usage, reason, notify)
+		ok, completion := params.PersistCompletion(text, usage, reason, notify)
+		if ok {
+			result.PersistedAt = time.Now()
+		}
+		return ok, completion
 	}
 	if err := timecontract.ValidateEpochMillis(params.StartedAtMillis, "startedAt", "run.executor"); err != nil {
 		// This is a local platform failure, so its error event is allowed to use

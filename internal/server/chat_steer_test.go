@@ -145,3 +145,21 @@ func TestChatSteerProxyDistinguishesNotSentFromUnknown(t *testing.T) {
 		})
 	}
 }
+
+func TestVoiceSteerProxyDoesNotDropAwaitingGuard(t *testing.T) {
+	fixture := newTestFixture(t)
+	for _, transport := range []string{"ws", "sse"} {
+		route := runtimeproxy.NewRoute("guard-"+transport, "chat", "agent")
+		route.Transport = transport
+		fixture.server.proxyRuntime.Register(route)
+		defer fixture.server.proxyRuntime.Unregister(route.RunID, route)
+		response, statusErr, matched := fixture.server.forwardProxySteer(api.SteerRequest{RunID: route.RunID, AgentKey: route.AgentKey, SteerID: "voice:session:2", Message: "change", RequireNoAwaiting: true})
+		if !matched || statusErr != nil || response.Accepted || response.Status != "unsupported" || len(route.SendQueue) != 0 {
+			t.Fatalf("media guard was dropped: %#v %v", response, statusErr)
+		}
+		submit, submitErr, submitMatched := fixture.server.forwardProxySubmit(api.SubmitRequest{RunID: route.RunID, AgentKey: route.AgentKey, AwaitingID: "question", SubmitID: "stable", RequireVoiceQuestion: true})
+		if !submitMatched || submitErr != nil || submit.Accepted || submit.Status != "unsupported" || len(route.SendQueue) != 0 {
+			t.Fatal("voice Submit guard was dropped", submit, submitErr)
+		}
+	}
+}

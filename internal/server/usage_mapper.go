@@ -6,7 +6,7 @@ import (
 	"agent-platform/internal/api"
 	"agent-platform/internal/chat"
 	"agent-platform/internal/contracts"
-	"agent-platform/internal/stream"
+	"agent-platform/internal/modelusage"
 )
 
 func mapUsageDataPtr(usage *chat.UsageData) *api.ChatUsageData {
@@ -62,29 +62,7 @@ func mapUsageData(usage chat.UsageData) api.ChatUsageData {
 	return out
 }
 
-func latestChatUsageFromEvents(events []stream.EventData) *api.ChatUsageData {
-	return latestUsageFromEvents(events, "chat")
-}
-
-func latestUsageFromEvents(events []stream.EventData, key string) *api.ChatUsageData {
-	var latest *api.ChatUsageData
-	for _, event := range events {
-		if event.Type != "usage.snapshot" && event.Type != "run.complete" && event.Type != "run.error" {
-			continue
-		}
-		usage, _ := event.Value("usage").(map[string]any)
-		selected, _ := usage[key].(map[string]any)
-		if selected == nil {
-			continue
-		}
-		if mapped := mapUsageDataFromPayload(selected); mapped != nil {
-			latest = mapped
-		}
-	}
-	return latest
-}
-
-func chatUsageBreakdown(summaryUsage *chat.UsageData, runs []chat.RunSummary, replayUsage chat.ReplayUsage) *api.ChatUsageBreakdown {
+func chatUsageBreakdown(summaryUsage *chat.UsageData, runs []chat.RunSummary, replayUsage chat.ReplayUsage) (*api.ChatUsageBreakdown, error) {
 	lastRun, _ := latestRunUsageWithModelFromSummaries(runs)
 	if replayRunID := strings.TrimSpace(replayUsage.LastRunID); replayRunID != "" {
 		if completedRun, _, foundCompletedRun := runUsageWithModelForID(runs, replayRunID); foundCompletedRun {
@@ -116,13 +94,55 @@ func chatUsageBreakdown(summaryUsage *chat.UsageData, runs []chat.RunSummary, re
 		}
 	}
 
+	var err error
+	chatUsage, err = mergeVoiceUsage(chatUsage, replayUsage.VoiceChat)
+	if err != nil {
+		return nil, err
+	}
+	lastRunID := strings.TrimSpace(replayUsage.LastRunID)
+	if lastRunID == "" && len(runs) > 0 {
+		lastRunID = runs[0].RunID
+	}
+	lastRun, err = mergeVoiceUsage(lastRun, replayUsage.VoiceByRun[lastRunID])
+	if err != nil {
+		return nil, err
+	}
 	if lastRun == nil && chatUsage == nil {
-		return nil
+		return nil, nil
 	}
-	return &api.ChatUsageBreakdown{
-		LastRun: lastRun,
-		Chat:    chatUsage,
+	return &api.ChatUsageBreakdown{LastRun: lastRun, Chat: chatUsage}, nil
+}
+
+// All public readers merge after selecting the original model/tool base.
+// API objects are copies; merged amounts never flow back into SQL or archives.
+func mergeVoiceUsage(base *api.ChatUsageData, voice chat.VoiceUsageTotals) (*api.ChatUsageData, error) {
+	if voice.Tasks == 0 {
+		return base, nil
 	}
+	var out api.ChatUsageData
+	if base != nil {
+		out = *base
+	}
+	var baseCost *modelusage.EstimatedCost
+	if out.EstimatedCost != nil {
+		value := modelusage.EstimatedCost(*out.EstimatedCost)
+		baseCost = &value
+	}
+	cost, err := chat.MergeVoiceCost(baseCost, voice)
+	if err != nil {
+		return nil, err
+	}
+	out.EstimatedCost = nil
+	if cost != nil {
+		value := api.EstimatedCost(*cost)
+		out.EstimatedCost = &value
+	}
+	out.Voice = &api.VoiceUsage{Tasks: voice.Tasks, UnknownTasks: voice.UnknownTasks, PendingTasks: voice.PendingTasks, UnpricedTasks: voice.UnpricedTasks, Characters: voice.Characters, BilledAudioSeconds: voice.BilledAudioSeconds}
+	if voice.Cost != nil {
+		value := api.EstimatedCost(*voice.Cost)
+		out.Voice.EstimatedCost = &value
+	}
+	return &out, nil
 }
 
 func applyEstimatedCost(target *api.ChatUsageData, source chat.UsageData) {

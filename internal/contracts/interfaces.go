@@ -721,8 +721,9 @@ type ModelUsage struct {
 	CacheMissTokens  int
 	// Characters is the provider-billed character count of models priced per
 	// character, such as speech synthesis.
-	Characters        int
-	UpstreamRequestID string
+	Characters         int
+	BilledAudioSeconds float64
+	UpstreamRequestID  string
 }
 
 func (u ModelUsage) HasTokens() bool {
@@ -732,7 +733,7 @@ func (u ModelUsage) HasTokens() bool {
 // HasBillableUsage reports whether the provider reported tokens or billed
 // characters.
 func (u ModelUsage) HasBillableUsage() bool {
-	return u.HasTokens() || u.Characters > 0
+	return u.HasTokens() || u.Characters > 0 || u.BilledAudioSeconds > 0
 }
 
 type SubmitInfo struct {
@@ -745,6 +746,7 @@ type SubmitInfo struct {
 }
 
 type AwaitingSubmitContext struct {
+	QuestionDraft      *queryinput.QuestionDraft
 	DelegateApproval   func(context.Context, string, queryinput.SubmitRequest) error
 	ExactApprovalIDs   []string // one-time approvals bound to these invocation IDs
 	Summaries          []ApprovalSummary
@@ -769,6 +771,7 @@ type AwaitingSubmitContext struct {
 
 func (c AwaitingSubmitContext) Clone() AwaitingSubmitContext {
 	return AwaitingSubmitContext{
+		QuestionDraft:      CloneQuestionDraft(c.QuestionDraft),
 		DelegateApproval:   c.DelegateApproval,
 		ExactApprovalIDs:   append([]string(nil), c.ExactApprovalIDs...),
 		Summaries:          append([]ApprovalSummary(nil), c.Summaries...),
@@ -853,13 +856,14 @@ type RunStartRequest struct {
 }
 
 type RunAwaiting struct {
-	ItemCount  int               `json:"itemCount"`
-	Summaries  []ApprovalSummary `json:"summaries,omitempty"`
-	Truncated  bool              `json:"truncated,omitempty"`
-	AwaitingID string            `json:"awaitingId"`
-	Mode       string            `json:"mode"`
-	Questions  []any             `json:"questions,omitempty"`
-	Payload    map[string]any    `json:"payload,omitempty"`
+	QuestionDraft *queryinput.QuestionDraft `json:"-"`
+	ItemCount     int                       `json:"itemCount"`
+	Summaries     []ApprovalSummary         `json:"summaries,omitempty"`
+	Truncated     bool                      `json:"truncated,omitempty"`
+	AwaitingID    string                    `json:"awaitingId"`
+	Mode          string                    `json:"mode"`
+	Questions     []any                     `json:"questions,omitempty"`
+	Payload       map[string]any            `json:"payload,omitempty"`
 }
 
 type RunSnapshot struct {

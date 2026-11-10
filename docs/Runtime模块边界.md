@@ -70,7 +70,13 @@ Runtime 的 Native 与 Proxy 阻塞调用直接取得执行结果，不再模拟
 
 ## 相邻应用服务
 
-- `voice.Service` 只持有当前媒体轮、一次 Runtime 调用及最多一份等待旧 Run 释放的定稿；复用 ExecuteQueryWithHooks/AttachRun/Interrupt 和完整 Completion。语音 WS 断开不取消 Run；应用关闭才通过 Runtime 中断本服务受理的 Run 并等待自身 goroutine 退出。新 Chat 的主要聊天设置沿普通 Primary:true 路径；内部 PrimaryIfMissing 复用 BackfillPrimaryChat 的 CAS，保护 hello 后并发发布的 primary。
+- `voice.Service` 只持有当前媒体轮、一次 Runtime 调用、最多一份等待旧 Run 释放的定稿，以及收音期间完成但尚未播放的一份结果；复用 ExecuteQueryWithHooks/AttachRun/Steer/Submit/Interrupt 和完整 Completion。语音 WS 断开不取消 Run；应用关闭才通过 Runtime 中断本服务受理的 Run 并等待自身 goroutine 退出。新 Chat 的主要聊天设置沿普通 Primary:true 路径；内部 PrimaryIfMissing 复用 BackfillPrimaryChat 的 CAS，保护 hello 后并发发布的 primary。
+
+voice 的 Run 开始、等待项观察和最终结果按 `ownedRun` 归属消费，不由发起时的媒体 turn 决定有效性；ASR、PCM 和合成回调仍校验当前 turn／speech。收音中完成的结果不抢播：空输入结束后重新核验 Persisted、非空 Completion、complete、无待处理 awaiting 和无新活动 Run；新输入或显式 abort 丢弃尚未播放的旧结果。观察者仍通过既有 Subscription.Close 完成 detach 与消费确认。v2 的 listen.ready 媒体边界与显式 speechId 已接入；执行中补充复用 Steer；收音冻结 ownedRun，定稿重查事实，仅明确未受理且原调用释放后才允许转下一轮 Query，未知结果不重发。受信任 voice scope 在原 RunControl 入队锁内拒绝任何有效 awaiting，普通 Steer 行为不变；Proxy 未支持此原子约束时拒绝转发。普通语音答题通过 Runtime.UpdateQuestionDraft 在原等待锁内更新草稿，GetRunStatus 从已注册等待项读取下一题，最终 Submit 在原仲裁锁内再次限制完整普通题；密码与其他 HITL 转原界面。草稿只经 Chat 当前 awaiting 投影读取，不进入模型／历史／公开 Run JSON。
+
+voice 通过 App 注入的 UsageWriter 窄入口交给 conversation 登记／结束计量和追加事实。conversation 与归档／删除共用 LockMutation，chat 负责 voice.usage 的校验、去重与回放；modelusage 拥有唯一价格算法。RunCompletion 和 SQL 仍只包含原模型／工具基值，服务端读接口最后合并 VoiceChat／VoiceByRun。Run 返回后仅在 voice worker 内等待媒体循环接手／丢弃结果，以保护到 TTS 启动的费用空隙，不延迟 Runtime 完成、不重复 OnRunCompleted、不增加 Agent 阶段。
+
+voice 阶段计时复用 observability.Log：内部 QueryResult.PersistedAt 在成功存储返回后捕获进程内 time.Time，保留单调时钟，不序列化到外部协议，不增加播放许可。runEnd 使用此时间，runReleased 单独记录阻塞调用与订阅收尾后的交付；ASR 定稿、供应商首个完整 PCM 采样和首帧实际写出分别记录。诊断以 sessionId／turn／runId／awaitingId／speechId／providerTaskId 关联，缺少的事实不补造；客户端已通过音频时钟观察 playStart，speechEnd 由采样标注输入；T08 本地可重叠窗口 P95 仅约 0.66～1.24ms，当前不引入预合成钩子或缓存；目标环境收益仍须实测，不能把服务端时刻当作扬声器出声。
 
 - `conversation.Service` 承担批量 Archive/Restore、active-run gate、Archive list/search/load/delete；`chat` 仍是持久化事实源。
 - `adminsource.Service` 承担 source mutation 锁以及 Agent ZIP 的 staging、reload 校验、commit、rollback 和恢复 reload 事务。

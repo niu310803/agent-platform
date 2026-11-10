@@ -229,13 +229,22 @@ func (s *Server) loadChatDetail(ctx context.Context, chatID string, includeRawMe
 		ContextWindow:  mapChatContextWindow(detail.ContextWindow),
 		References:     nil,
 	}
+	if response.Awaiting != nil && response.Awaiting.Mode == "question" && s.deps.Runs != nil {
+		if current, ok := s.deps.Runs.LookupAwaiting(response.Awaiting.RunID, response.Awaiting.AwaitingID); ok && current.Mode == "question" {
+			response.Awaiting.QuestionDraft = contracts.CloneQuestionDraft(current.QuestionDraft)
+		}
+	}
 	runs, err := s.deps.Chats.ListRuns(chatID)
 	if err != nil {
 		return api.ChatDetailResponse{}, err
 	}
 	response.Runs = make([]api.RunSummary, 0, len(runs))
 	for _, run := range runs {
-		response.Runs = append(response.Runs, mapRunSummary(run))
+		mapped, err := mapRunSummary(run, detail.ReplayUsage.VoiceByRun[run.RunID])
+		if err != nil {
+			return api.ChatDetailResponse{}, err
+		}
+		response.Runs = append(response.Runs, mapped)
 	}
 	if principal := PrincipalFromContext(ctx); principal != nil {
 		response.ResourceTicket = s.ticketService.Issue(principal.Subject, detail.ChatID)
@@ -252,10 +261,9 @@ func (s *Server) loadChatDetail(ctx context.Context, chatID string, includeRawMe
 	if detail.Artifact != nil {
 		response.Artifact = detail.Artifact
 	}
-	if summary != nil {
-		response.Usage = chatUsageBreakdown(summary.Usage, runs, detail.ReplayUsage)
-	} else {
-		response.Usage = chatUsageBreakdown(nil, runs, detail.ReplayUsage)
+	response.Usage, err = chatUsageBreakdown(summary.Usage, runs, detail.ReplayUsage)
+	if err != nil {
+		return api.ChatDetailResponse{}, err
 	}
 	if s.deps.Runs != nil {
 		activeRun, ok, activeErr := s.deps.Runs.ActiveRunForChat(chatID)

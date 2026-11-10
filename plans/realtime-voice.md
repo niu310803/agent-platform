@@ -2,13 +2,13 @@
 
 日期：2026-10-30 初稿，2026-11-01 改为通用方案，2026-11-02 实现 v1 后精简为决策与剩余工作。
 
-## 现状
+## 2026-11-02 历史快照
 
 - 已实现：Platform 进程内 `internal/voice`（DashScope Paraformer 实时识别 + CosyVoice 流式合成，PCM 半双工）、`/api/voice/capabilities` 与 `/api/voice/ws`、模型 registry 的 `asr` 类型与两个实时协议，后端隔离矩阵已通过。WebClient v1（agent-webclient #49）与 Desktop 宿主代理（zenmind-desktop #239）已合并切换。
-- 协议与会话语义见 [API 与协议](../docs/API与协议.md#实时语音-v1)，模型与 runtime 配置见 [配置化说明](../docs/配置化说明.md#实时语音模型与部署配置)，模块边界见 [Runtime 模块边界](../docs/Runtime模块边界.md)。
+- 协议与会话语义见 [API 与协议](../docs/API与协议.md#实时语音-v2)，模型与 runtime 配置见 [配置化说明](../docs/配置化说明.md#实时语音模型与部署配置)，模块边界见 [Runtime 模块边界](../docs/Runtime模块边界.md)。
 - 阶段 0（2026-11-02）：现有 dashscope Key 经经典 WS 地址调通两个模型，单次冷连接 TTS 提交文本到首包约 291ms，ASR 发送结束到定稿约 392ms。只有一个样本，未覆盖完整 Agent 链路和延迟分位数。复测用 `scripts/voice-probe`（真实计费）。
 
-## 已定决策
+## 当时决策（变更以 v2 当前合同为准）
 
 - 不设独立网关：voice 在 Platform 进程内经 Runtime 启动、观察和中断 Run，身份即 Platform principal，凭据与模型复用 model registry。
 - 级联方案（识别 → Agent Run → 合成），不用端到端语音模型，以免绕开 Agent 循环、工具权限、HITL、记忆和 registry。
@@ -18,7 +18,7 @@
 - 断线不取消 Run、不续播、不补录。
 - 协议形状参考小智 xiaozhi-esp32，字段用平台 camelCase，不承诺与小智固件线协议兼容。客户端自行串联 `asr.*`/`tts.*` 的旧语音协议废弃；需要音频文件时用 `speech_generate`。
 
-## 剩余工作
+## 当时剩余工作（不作为当前进度表）
 
 1. zenmind-gateway：nginx 仍把 `/api/voice/` 转发到旧 voice-server（11953），需改为转发 Platform 并支持 WS 升级，再决定 voice-server 何时下线。切换前不得宣称可经网关使用。
 2. 阶段 1 验收：
@@ -43,3 +43,7 @@
 - CosyVoice 客户端事件（format、sample_rate）：https://www.alibabacloud.com/help/zh/model-studio/cosyvoice-client-events
 - ESP32-S3 AFE：https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/audio_front_end/README.html
 - ESP32-S3 AEC：https://docs.espressif.com/projects/esp-sr/en/latest/esp32s3/acoustic_echo_cancellation/README.html
+
+2026-11-06：本轮改造入口为 workspace `plan/2026-11-06-realtime-voice-refactor/`。Platform／WebClient 当前工作区已切 v2，完成媒体与 Run 归属解耦、listen.ready 边界、speechId 和按键入口；本地执行中 Steer 分流与尾部未受理处理已接入，完整 question 草稿／Submit 仍在实施；代理语音补充因缺少上游原子等待项检查而明确拒绝。本文既有 v1 发布与验收记录保留原范围，不代表 v2 真实部署通过。
+
+2026-11-08 当前软件状态：已接入完整 question 草稿／Submit、密码界面交接、按键／全双工选择、本地 VAD、有界预录、设备 TTL 与续期约束、语音实报用量和费用投影、Opus 16k mono 上行（仅已验证模型）。下行保持 PCM，真实 Opus TTS 的 granule／EOS 不合格而拒绝支持；不引入服务端转码。T08 本地完成收尾窗口为毫秒量级，不增加预合成路径。固定唤醒词不在本轮范围。软件测试不等于真实设备、真人声学或网关部署验收；详细状态及证据只维护在 workspace 本轮计划。

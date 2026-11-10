@@ -203,6 +203,12 @@ func (r *historyReplay) replayEvent(line map[string]any) error {
 	if len(event) == 0 {
 		return nil
 	}
+	if event["type"] == "voice.usage" {
+		if r.voiceUsage == nil {
+			r.voiceUsage = map[string]VoiceUsage{}
+		}
+		return foldVoiceEvent(r.voiceUsage, event) // No ensureRun, transcript or terminal event.
+	}
 	event = cloneStringAnyMap(event)
 	clearReplayCursorFields(event)
 	if strings.TrimSpace(stringFromAny(event["type"])) == "planning.snapshot" {

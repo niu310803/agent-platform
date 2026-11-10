@@ -180,6 +180,11 @@ func validateCurrentJSONLLine(line map[string]any) error {
 			return newJSONLSchemaViolation(line, "event.type", "persistable event type", stringFromAny(event["type"]), "event type is not persisted as an event line")
 		case "request.steer":
 			return newJSONLSchemaViolation(line, "event.type", "non-steer event type", stringFromAny(event["type"]), "request.steer is persisted only as a steer line")
+		case "voice.usage":
+			usage, err := voiceUsageFromEvent(event)
+			if err != nil || stringFromAny(line["runId"]) != usage.RunID {
+				return newJSONLSchemaViolation(line, "event.usage", "valid voice usage with matching Run", "invalid", "invalid voice usage fact")
+			}
 		}
 	}
 

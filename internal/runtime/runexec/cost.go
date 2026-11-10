@@ -7,6 +7,7 @@ import (
 	"agent-platform/internal/config"
 	"agent-platform/internal/contracts"
 	"agent-platform/internal/models"
+	"agent-platform/internal/modelusage"
 	"agent-platform/internal/stream"
 )
 
@@ -72,10 +73,20 @@ func (d UsageCostDecorator) EstimateForModel(usage chat.UsageData) chat.UsageDat
 		return usage
 	}
 	model, err := d.Models.GetModel(modelKey)
-	if err != nil || !ModelPricingEnabled(model.Pricing) {
+	if err != nil || !modelusage.PricingEnabled(model.Pricing) {
 		return usage
 	}
-	return EstimateUsageCost(usage, model.Pricing, d.Billing)
+	hit := usage.PromptCacheHitTokens
+	if hit <= 0 {
+		hit = usage.CachedTokens
+	}
+	cost := modelusage.EstimateCost(contracts.ModelUsage{PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens,
+		CacheHitTokens: hit, CacheMissTokens: usage.PromptCacheMissTokens, Characters: usage.Characters, BilledAudioSeconds: usage.BilledAudioSeconds}, model.Pricing, d.Billing.Currency)
+	if cost != nil {
+		usage.EstimatedCostCurrency, usage.EstimatedCostTotal = cost.Currency, cost.Total
+		usage.EstimatedCostInputHit, usage.EstimatedCostInputMiss, usage.EstimatedCostOutput = cost.InputCacheHit, cost.InputCacheMiss, cost.Output
+	}
+	return usage
 }
 
 func UsageModelKeyFromEvent(data *stream.EventData, usage map[string]any) string {
@@ -98,49 +109,5 @@ func UsageModelKeyFromDebugData(inner map[string]any, usage map[string]any) stri
 func UsageHasBillableUsage(usage chat.UsageData) bool {
 	return usage.PromptTokens > 0 || usage.CompletionTokens > 0 || usage.TotalTokens > 0 ||
 		usage.CachedTokens > 0 || usage.PromptCacheHitTokens > 0 || usage.PromptCacheMissTokens > 0 ||
-		usage.Characters > 0
-}
-
-func EstimateUsageCost(usage chat.UsageData, pricing models.ModelPricing, billing config.BillingConfig) chat.UsageData {
-	if !ModelPricingEnabled(pricing) {
-		return usage
-	}
-	currency := strings.ToUpper(strings.TrimSpace(pricing.Currency))
-	if currency == "" {
-		currency = strings.ToUpper(strings.TrimSpace(billing.Currency))
-	}
-	if currency == "" {
-		currency = "CNY"
-	}
-	usage.EstimatedCostCurrency = currency
-	if pricing.Unit == models.PricingUnitPer10KCharacters {
-		// Character pricing has no input/output split; only the total is set.
-		usage.EstimatedCostInputHit = 0
-		usage.EstimatedCostInputMiss = 0
-		usage.EstimatedCostOutput = 0
-		usage.EstimatedCostTotal = float64(usage.Characters) * pricing.Characters / 10_000
-		return usage
-	}
-	cacheHitTokens := usage.PromptCacheHitTokens
-	if cacheHitTokens <= 0 {
-		cacheHitTokens = usage.CachedTokens
-	}
-	cacheMissTokens := usage.PromptCacheMissTokens
-	if cacheHitTokens <= 0 && cacheMissTokens <= 0 {
-		cacheMissTokens = usage.PromptTokens
-	} else if cacheMissTokens <= 0 && usage.PromptTokens > cacheHitTokens {
-		cacheMissTokens = usage.PromptTokens - cacheHitTokens
-	}
-	usage.EstimatedCostInputHit = float64(cacheHitTokens) * pricing.InputCacheHit / 1_000_000
-	usage.EstimatedCostInputMiss = float64(cacheMissTokens) * pricing.InputCacheMiss / 1_000_000
-	usage.EstimatedCostOutput = float64(usage.CompletionTokens) * pricing.Output / 1_000_000
-	usage.EstimatedCostTotal = usage.EstimatedCostInputHit + usage.EstimatedCostInputMiss + usage.EstimatedCostOutput
-	return usage
-}
-
-func ModelPricingEnabled(pricing models.ModelPricing) bool {
-	if pricing.Unit == models.PricingUnitPer10KCharacters {
-		return pricing.Characters > 0
-	}
-	return pricing.InputCacheHit > 0 || pricing.InputCacheMiss > 0 || pricing.Output > 0
+		usage.Characters > 0 || usage.BilledAudioSeconds > 0
 }

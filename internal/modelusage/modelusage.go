@@ -15,6 +15,7 @@ const (
 	OperationImageInpainting = "image.inpainting"
 	OperationVision          = "vision.recognize"
 	OperationSpeech          = "speech.generation"
+	OperationRecognition     = "speech.recognition"
 )
 
 // FromProvider converts a raw provider usage object. It accepts the Chat

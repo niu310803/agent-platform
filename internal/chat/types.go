@@ -525,9 +525,11 @@ type Detail struct {
 }
 
 type ReplayUsage struct {
-	LastRunID string
-	LastRun   UsageData
-	Chat      UsageData
+	LastRunID  string
+	LastRun    UsageData
+	Chat       UsageData
+	VoiceChat  VoiceUsageTotals            `json:"-"`
+	VoiceByRun map[string]VoiceUsageTotals `json:"-"`
 }
 
 type UsageData struct {
@@ -542,6 +544,7 @@ type UsageData struct {
 	// Characters carries one tool call's provider-billed characters for
 	// pricing; run totals keep only the resulting cost.
 	Characters               int     `json:"-"`
+	BilledAudioSeconds       float64 `json:"-"`
 	EstimatedCostCurrency    string  `json:"-"`
 	EstimatedCostInputHit    float64 `json:"-"`
 	EstimatedCostInputMiss   float64 `json:"-"`

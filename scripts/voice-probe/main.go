@@ -10,6 +10,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
@@ -23,6 +24,7 @@ import (
 	"unicode"
 
 	"agent-platform/internal/config"
+	voicemedia "agent-platform/internal/voice"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -96,8 +98,8 @@ func read(c *websocket.Conn, id string) ([]byte, *event, error) {
 	return nil, &e, nil
 }
 
-func (p probe) tts(ctx context.Context, model, voice, text string) ([]byte, map[string]any, error) {
-	m := map[string]any{"model": model, "voice": voice, "sample_rate": 16000, "format": "pcm"}
+func (p probe) tts(ctx context.Context, model, voice, text, format string, sampleRate int) ([]byte, map[string]any, error) {
+	m := map[string]any{"model": model, "voice": voice, "sample_rate": sampleRate, "format": format}
 	c, latency, err := p.dial(ctx)
 	m["connect_ms"] = latency
 	if err != nil {
@@ -106,7 +108,7 @@ func (p probe) tts(ctx context.Context, model, voice, text string) ([]byte, map[
 	defer c.Close()
 	id := uuid.NewString()
 	start := time.Now()
-	err = send(c, id, "run-task", map[string]any{"task_group": "audio", "task": "tts", "function": "SpeechSynthesizer", "model": model, "parameters": map[string]any{"text_type": "PlainText", "voice": voice, "format": "pcm", "sample_rate": 16000}, "input": map[string]any{}})
+	err = send(c, id, "run-task", map[string]any{"task_group": "audio", "task": "tts", "function": "SpeechSynthesizer", "model": model, "parameters": map[string]any{"text_type": "PlainText", "voice": voice, "format": format, "sample_rate": sampleRate}, "input": map[string]any{}})
 	if err != nil {
 		return nil, m, err
 	}
@@ -127,6 +129,7 @@ func (p probe) tts(ctx context.Context, model, voice, text string) ([]byte, map[
 	}
 	var audio []byte
 	chunks := 0
+	var sizes []int
 	for {
 		b, e, err := read(c, id)
 		if err != nil {
@@ -139,8 +142,9 @@ func (p probe) tts(ctx context.Context, model, voice, text string) ([]byte, map[
 			}
 			audio = append(audio, b...)
 			chunks++
-			if len(audio) > 32000*30 {
-				return nil, m, fmt.Errorf("audio exceeds 30s probe limit")
+			sizes = append(sizes, len(b))
+			if len(audio) > 2<<20 || chunks > 4096 || format == "pcm" && len(audio) > sampleRate*2*30 {
+				return nil, m, fmt.Errorf("audio exceeds bounded probe limit")
 			}
 		}
 		if e != nil && len(e.Payload.Usage) > 0 && string(e.Payload.Usage) != "null" {
@@ -149,6 +153,19 @@ func (p probe) tts(ctx context.Context, model, voice, text string) ([]byte, map[
 		if e != nil && e.Header.Event == "task-finished" {
 			break
 		}
+	}
+	m["task_finished_ms"] = ms(start)
+	m["audio_bytes"] = len(audio)
+	m["binary_messages"] = chunks
+	m["binary_message_sizes"] = sizes
+	m["audio_sha256"] = fmt.Sprintf("%x", sha256.Sum256(audio))
+	m["prefix_hex"] = fmt.Sprintf("%x", audio[:min(len(audio), 32)])
+	if format != "pcm" {
+		if len(audio) == 0 {
+			return nil, m, fmt.Errorf("empty provider audio")
+		}
+		// Retain observed bytes; a format name alone does not establish a container.
+		return audio, m, nil
 	}
 	if len(audio) == 0 || len(audio)%2 != 0 || bytes.HasPrefix(audio, []byte("RIFF")) {
 		return nil, m, fmt.Errorf("expected nonempty raw PCM16 audio")
@@ -166,16 +183,21 @@ func (p probe) tts(ctx context.Context, model, voice, text string) ([]byte, map[
 	if peak == 0 {
 		return nil, m, fmt.Errorf("audio is entirely silent")
 	}
-	m["task_finished_ms"] = ms(start)
-	m["audio_bytes"] = len(audio)
-	m["audio_duration_ms"] = float64(len(audio)) / 32
-	m["binary_messages"] = chunks
+	m["audio_duration_ms"] = float64(len(audio)) * 1000 / float64(sampleRate*2)
 	m["pcm_peak"] = peak
 	return audio, m, nil
 }
 
-func (p probe) asr(ctx context.Context, model string, audio []byte) (map[string]any, error) {
-	m := map[string]any{"model": model, "sample_rate": 16000, "format": "pcm", "send_chunk_ms": 100, "trailing_silence_ms": 1200, "max_sentence_silence_ms": 600}
+func (p probe) asr(ctx context.Context, model string, audio []byte, format string) (map[string]any, error) {
+	m := map[string]any{"model": model, "sample_rate": 16000, "format": format, "trailing_silence_ms": 1200, "max_sentence_silence_ms": 600}
+	chunks, sourceDuration, err := probeInput(audio, format)
+	if err != nil {
+		return m, err
+	}
+	if format == "opus" {
+		m["trailing_silence_ms"] = 0
+		m["send_pacing"] = "validated Ogg granules; no fabricated silence"
+	}
 	c, latency, err := p.dial(ctx)
 	m["connect_ms"] = latency
 	if err != nil {
@@ -184,7 +206,7 @@ func (p probe) asr(ctx context.Context, model string, audio []byte) (map[string]
 	defer c.Close()
 	id := uuid.NewString()
 	start := time.Now()
-	err = send(c, id, "run-task", map[string]any{"task_group": "audio", "task": "asr", "function": "recognition", "model": model, "parameters": map[string]any{"format": "pcm", "sample_rate": 16000, "semantic_punctuation_enabled": false, "max_sentence_silence": 600, "language_hints": []string{"zh"}}, "input": map[string]any{}})
+	err = send(c, id, "run-task", map[string]any{"task_group": "audio", "task": "asr", "function": "recognition", "model": model, "parameters": map[string]any{"format": format, "sample_rate": 16000, "semantic_punctuation_enabled": false, "max_sentence_silence": 600, "language_hints": []string{"zh"}}, "input": map[string]any{}})
 	if err != nil {
 		return m, err
 	}
@@ -203,19 +225,14 @@ func (p probe) asr(ctx context.Context, model string, audio []byte) (map[string]
 	sentCh := make(chan sent, 1)
 	streamStart := time.Now()
 	go func() {
-		all := append(append([]byte(nil), audio...), make([]byte, 38400)...)
-		var end time.Time
-		for offset := 0; offset < len(all); offset += 3200 {
-			n := min(offset+3200, len(all))
-			if err := c.WriteMessage(websocket.BinaryMessage, all[offset:n]); err != nil {
+		end := streamStart.Add(sourceDuration)
+		for _, chunk := range chunks {
+			if err := c.WriteMessage(websocket.BinaryMessage, chunk.data); err != nil {
 				sentCh <- sent{err: err}
 				c.Close()
 				return
 			}
-			if offset < len(audio) && n >= len(audio) {
-				end = time.Now().Add(time.Duration(len(audio)-offset) * time.Second / 32000)
-			}
-			target := streamStart.Add(time.Duration(n) * time.Second / 32000)
+			target := streamStart.Add(chunk.until)
 			timer := time.NewTimer(max(time.Until(target), 0))
 			select {
 			case <-ctx.Done():
@@ -295,14 +312,42 @@ func normalized(s string) string {
 }
 
 func main() {
+	timings := flag.String("timings", "", "offline JSONL timing capture to summarize; no provider connection")
+	browserScript := flag.Bool("browser-script", false, "print the bounded browser timing collector; no provider connection")
 	provider := flag.String("provider", "", "existing provider YAML path")
 	out := flag.String("out", "", "directory for sanitized report and audio")
 	ttsModel := flag.String("tts", "cosyvoice-v3-flash", "TTS model ID")
 	asrModel := flag.String("asr", "paraformer-realtime-v2", "ASR model ID")
 	voice := flag.String("voice", "longanyang", "TTS voice")
+	ttsFormat := flag.String("tts-format", "pcm", "provider output format: pcm or opus; compressed bytes remain uninterpreted")
+	sampleRate := flag.Int("sample-rate", 16000, "TTS sample rate: 16000 or 24000")
+	ttsOnly := flag.Bool("tts-only", false, "inspect TTS output without an ASR task")
+	inspectOgg := flag.String("inspect-ogg", "", "validate captured Ogg offline; no provider connection")
+	opusPackets := flag.String("opus-packets", "", "JSON preSkip48k and base64 packets fixture; remux and perform one ASR task, no TTS")
 	flag.Parse()
+	if *inspectOgg != "" {
+		if err := inspectOggFile(*inspectOgg); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+	if *browserScript {
+		fmt.Print(browserTimingScript)
+		return
+	}
+	if *timings != "" {
+		if err := reportTimings(*timings, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *provider == "" || *out == "" {
 		fmt.Fprintln(os.Stderr, "-provider and -out are required")
+		os.Exit(2)
+	}
+	if (*ttsFormat != "pcm" && *ttsFormat != "opus") || (*sampleRate != 16000 && *sampleRate != 24000) || !*ttsOnly && (*ttsFormat != "pcm" || *sampleRate != 16000) {
+		fmt.Fprintln(os.Stderr, "unsupported probe combination: compressed or 24k output currently requires -tts-only")
 		os.Exit(2)
 	}
 	tree, err := config.LoadYAMLTree(*provider)
@@ -326,21 +371,46 @@ func main() {
 	p := probe{endpoint: u.String(), header: http.Header{"Authorization": []string{"Bearer " + strings.TrimSpace(key)}}, deadline: deadline}
 	text := "你好，今天天气怎么样"
 	report := map[string]any{"tested_at": time.Now().Format(time.RFC3339), "endpoint": u.String(), "route": "direct; no relay or environment proxy", "text": text, "provider_file": *provider, "scope": "one cold TTS task followed by one real-time-paced ASR task; no Agent Run"}
-	audio, tts, err := p.tts(ctx, *ttsModel, *voice, text)
+	if *ttsOnly {
+		report["scope"] = "one cold TTS task; no ASR or Agent Run; output requires format inspection"
+	}
+	if *opusPackets != "" {
+		report["scope"] = "explicit packet fixture remux to Ogg and one paced ASR task; no TTS or Agent Run"
+		asr, asrErr := p.opusASR(ctx, *asrModel, *opusPackets, *out)
+		report["asr"] = asr
+		if asrErr != nil {
+			report["error"] = strings.ReplaceAll(asrErr.Error(), key, "[REDACTED]")
+		} else {
+			report["normalized_text_matches"] = normalized(asr["text"].(string)) == normalized(text)
+		}
+		writeReport(*out, report)
+		return
+	}
+	audio, tts, err := p.tts(ctx, *ttsModel, *voice, text, *ttsFormat, *sampleRate)
 	report["tts"] = tts
 	if err != nil {
 		report["error"] = strings.ReplaceAll(err.Error(), key, "[REDACTED]")
 	} else {
-		if err = os.MkdirAll(*out, 0700); err == nil {
-			err = os.WriteFile(filepath.Join(*out, "tts.pcm"), audio, 0600)
+		filename := "tts.pcm"
+		if *ttsFormat != "pcm" {
+			filename = "tts.bin"
 		}
-		if err == nil {
+		if err = os.MkdirAll(*out, 0700); err == nil {
+			err = os.WriteFile(filepath.Join(*out, filename), audio, 0600)
+		}
+		if err == nil && *ttsFormat == "pcm" && *sampleRate == 16000 {
 			err = writeWAV(filepath.Join(*out, "tts.wav"), audio)
 		}
 		if err != nil {
 			report["error"] = "unable to save probe audio"
-		} else {
-			asr, asrErr := p.asr(ctx, *asrModel, audio)
+		} else if *ttsFormat == "opus" {
+			info, formatErr := voicemedia.InspectOpusOgg(audio)
+			tts["ogg"] = info
+			if formatErr != nil {
+				report["error"] = formatErr.Error()
+			}
+		} else if !*ttsOnly {
+			asr, asrErr := p.asr(ctx, *asrModel, audio, "pcm")
 			report["asr"] = asr
 			if asrErr != nil {
 				report["error"] = strings.ReplaceAll(asrErr.Error(), key, "[REDACTED]")
@@ -349,13 +419,17 @@ func main() {
 			}
 		}
 	}
+	writeReport(*out, report)
+}
+
+func writeReport(out string, report map[string]any) {
 	b, _ := json.MarshalIndent(report, "", "  ")
 	b = append(b, '\n')
-	if err := os.MkdirAll(*out, 0700); err != nil {
+	if err := os.MkdirAll(out, 0700); err != nil {
 		fmt.Fprintln(os.Stderr, "unable to create output directory")
 		os.Exit(1)
 	}
-	if err := os.WriteFile(filepath.Join(*out, "report.json"), b, 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(out, "report.json"), b, 0600); err != nil {
 		fmt.Fprintln(os.Stderr, "unable to save report")
 		os.Exit(1)
 	}

@@ -120,11 +120,7 @@ func (h *AskUserQuestionHandler) NormalizeSubmit(args map[string]any, params any
 	for index, answerMap := range rawAnswers {
 		definition := questionDefs[index]
 		questionText := contracts.AnyStringNode(definition["question"])
-		rawValue, err := normalizeQuestionSubmitValue(definition, answerMap)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", questionText, err)
-		}
-		normalizedAnswer, err := normalizeQuestionAnswer(definition, rawValue)
+		normalizedAnswer, err := NormalizeQuestionSubmitItem(definition, answerMap)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", questionText, err)
 		}

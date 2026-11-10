@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"agent-platform/internal/api"
 	"agent-platform/internal/chat"
@@ -53,8 +54,14 @@ func TestSharedExecutorFailureAndContinuationLifecycle(t *testing.T) {
 			}
 			var order []string
 			var completed chat.RunCompletion
+			var completedAt time.Time
 			complete := params.OnComplete
-			params.OnComplete = func(value chat.RunCompletion) { completed = value; complete(value); order = append(order, "complete") }
+			params.OnComplete = func(value chat.RunCompletion) {
+				completedAt = time.Now()
+				completed = value
+				complete(value)
+				order = append(order, "complete")
+			}
 			params.OnContinuation = func(value contracts.DeltaRunContinuation) (string, error) {
 				if value.RunID != "next-run" {
 					t.Fatalf("continuation=%#v", value)
@@ -69,6 +76,9 @@ func TestSharedExecutorFailureAndContinuationLifecycle(t *testing.T) {
 				}
 			}
 			result := runExecutor(params)
+			if result.PersistedAt.IsZero() || result.PersistedAt.After(completedAt) {
+				t.Fatal("persistence timing was taken after completion cleanup", result.PersistedAt, completedAt)
+			}
 			expected := terminal
 			if terminal == "persistence-error" {
 				expected = "error"

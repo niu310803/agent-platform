@@ -14,9 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"agent-platform/internal/chat"
 	"agent-platform/internal/httpclient"
 	"agent-platform/internal/models"
+	"agent-platform/internal/modelusage"
 	"agent-platform/internal/observability"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -30,9 +33,10 @@ const (
 	// Listening PCM queues for the whole startup path (stale reused socket,
 	// fresh dial, task-started), so a slow route starts late or fails with its
 	// own error instead of overflowing first. A proxied dial took over 2s.
-	maxStartupPCM      = int((reusedStartupTimeout+2*startupTimeout)/(20*time.Millisecond)) * 640
-	maxRecordingPCM    = 1920000
-	maxTranscriptChars = 4000
+	maxStartupAudio        = reusedStartupTimeout + 2*startupTimeout
+	maxStartupAudioBytes   = int(maxStartupAudio/time.Second) * 32000
+	maxRecordingAudioBytes = 1920000
+	maxTranscriptChars     = 4000
 )
 
 // errProviderTransport marks socket write/read failures, as opposed to events
@@ -48,6 +52,7 @@ type dashScopeSocket struct {
 	model    models.ModelDefinition
 	provider models.ProviderDefinition
 	endpoint string
+	pricing  func() (models.ModelPricing, error)
 }
 
 type dashScopeEvent struct {
@@ -58,6 +63,10 @@ type dashScopeEvent struct {
 		ErrorMessage string `json:"error_message"`
 	} `json:"header"`
 	Payload struct {
+		Usage *struct {
+			Characters *int     `json:"characters"`
+			Duration   *float64 `json:"duration"`
+		} `json:"usage"`
 		Output struct {
 			Sentence struct {
 				Begin     int    `json:"begin_time"`
@@ -189,8 +198,17 @@ func (s *dashScopeSocket) logFailure(fields map[string]any, reason string, secre
 }
 
 // taskTrace reports how far provider startup got to the session that owns the
-// task: the media goroutine stores unix nanos, the event loop reads them.
-type taskTrace struct{ connected, started atomic.Int64 }
+// task. Keep time.Time's monotonic clock across the goroutine boundary.
+type taskTrace struct {
+	connected, started atomic.Pointer[time.Time]
+	taskID             atomic.Pointer[string]
+	reused, retried    atomic.Bool
+}
+
+func traceTime(target *atomic.Pointer[time.Time]) {
+	now := time.Now()
+	target.Store(&now)
+}
 
 type taskTraceKey struct{}
 
@@ -200,9 +218,9 @@ func withTaskTrace(ctx context.Context, trace *taskTrace) context.Context {
 
 func (t *taskTrace) phase() string {
 	switch {
-	case t.started.Load() != 0:
+	case t.started.Load() != nil:
 		return "streaming"
-	case t.connected.Load() != 0:
+	case t.connected.Load() != nil:
 		return "awaiting_task_started"
 	default:
 		return "connecting"
@@ -212,32 +230,54 @@ func (t *taskTrace) phase() string {
 // start sends run-task and waits for task-started. Nothing of this task has
 // reached the provider before task-started, so a reused socket that the
 // provider or network closed while idle is replaced once by a fresh one.
-func (s *dashScopeSocket) start(ctx context.Context, id string, payload map[string]any) (*websocket.Conn, func(bool), error) {
+func (s *dashScopeSocket) start(ctx context.Context, payload map[string]any) (*websocket.Conn, func(bool), []chat.VoiceUsage, error) {
+	var usages []chat.VoiceUsage
 	trace, _ := ctx.Value(taskTraceKey{}).(*taskTrace)
 	if trace == nil {
 		trace = &taskTrace{}
 	}
+	trace.started.Store(nil)
+	trace.reused.Store(false)
 	for retry := true; ; retry = false {
-		trace.connected.Store(0)
+		trace.retried.Store(!retry)
+		trace.connected.Store(nil)
 		conn, end, reused, err := s.begin(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, usages, err
 		}
-		trace.connected.Store(time.Now().UnixNano())
+		pricing := s.model.Pricing
+		if s.pricing != nil {
+			pricing, err = s.pricing()
+			if err != nil {
+				end(true)
+				return nil, nil, usages, err
+			}
+		}
+		id := uuid.NewString()
+		operation := modelusage.OperationSpeech
+		if s.model.Type == models.ModelTypeASR {
+			operation = modelusage.OperationRecognition
+		}
+		usages = append(usages, chat.VoiceUsage{UsageID: id, TaskID: id, Provider: s.provider.Key, Model: s.model.Key, Operation: operation, Pricing: pricing, Status: "running"})
+		usage := &usages[len(usages)-1]
+		trace.taskID.Store(&id)
+		trace.reused.Store(reused)
+		traceTime(&trace.connected)
 		timeout := startupTimeout
 		if reused && retry {
 			timeout = reusedStartupTimeout
 		}
 		if err = dashCommand(conn, id, "run-task", payload); err == nil {
-			err = s.started(conn, id, timeout)
+			err = s.started(conn, id, timeout, usage)
 		}
 		if err == nil {
-			trace.started.Store(time.Now().UnixNano())
-			return conn, end, nil
+			traceTime(&trace.started)
+			return conn, end, usages, nil
 		}
 		end(false)
+		usage.Status = "failed"
 		if !retry || !reused || ctx.Err() != nil || !errors.Is(err, errProviderTransport) {
-			return nil, nil, err
+			return nil, nil, usages, err
 		}
 	}
 }
@@ -250,7 +290,7 @@ func dashCommand(c *websocket.Conn, id, action string, payload map[string]any) e
 	return nil
 }
 
-func (s *dashScopeSocket) read(c *websocket.Conn, id string, deadline time.Time) ([]byte, *dashScopeEvent, error) {
+func (s *dashScopeSocket) read(c *websocket.Conn, id string, deadline time.Time, usage *chat.VoiceUsage) ([]byte, *dashScopeEvent, error) {
 	_ = c.SetReadDeadline(deadline)
 	for {
 		kind, data, err := c.ReadMessage()
@@ -278,6 +318,9 @@ func (s *dashScopeSocket) read(c *websocket.Conn, id string, deadline time.Time)
 		if event.Header.TaskID != id {
 			continue
 		}
+		if err := recordProviderUsage(event, usage); err != nil {
+			return nil, nil, err
+		}
 		if event.Header.Event == "task-failed" {
 			s.logFailure(map[string]any{"stage": "task_failed", "code": event.Header.ErrorCode}, event.Header.ErrorMessage)
 			return nil, nil, errors.New("voice provider task failed")
@@ -286,8 +329,8 @@ func (s *dashScopeSocket) read(c *websocket.Conn, id string, deadline time.Time)
 	}
 }
 
-func (s *dashScopeSocket) started(c *websocket.Conn, id string, timeout time.Duration) error {
-	_, event, err := s.read(c, id, time.Now().Add(timeout))
+func (s *dashScopeSocket) started(c *websocket.Conn, id string, timeout time.Duration, usage *chat.VoiceUsage) error {
+	_, event, err := s.read(c, id, time.Now().Add(timeout), usage)
 	if err != nil {
 		return err
 	}

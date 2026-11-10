@@ -43,12 +43,14 @@ func QueryRoleVisible(role string) bool {
 }
 
 type SubmitRequest struct {
-	Origin      *Origin        `json:"-"`
-	MailHop     *int           `json:"-"`
-	AccessGrant map[string]any `json:"-"`
-	ChatID      string         `json:"chatId,omitempty"`
-	RunID       string         `json:"runId"`
-	AgentKey    string         `json:"agentKey,omitempty"`
+	// Trusted in-process constraint, rechecked inside the awaiting arbiter.
+	RequireVoiceQuestion bool           `json:"-"`
+	Origin               *Origin        `json:"-"`
+	MailHop              *int           `json:"-"`
+	AccessGrant          map[string]any `json:"-"`
+	ChatID               string         `json:"chatId,omitempty"`
+	RunID                string         `json:"runId"`
+	AgentKey             string         `json:"agentKey,omitempty"`
 
 	AwaitingID string `json:"awaitingId"`
 	SubmitID   string `json:"submitId,omitempty"`
@@ -220,13 +222,15 @@ type SubmitResponse struct {
 }
 
 type SteerRequest struct {
-	ModelMessage string     `json:"-"`
-	Mail         *MailInput `json:"-"`
-	RequestID    string     `json:"requestId,omitempty"`
-	ChatID       string     `json:"chatId,omitempty"`
-	RunID        string     `json:"runId"`
-	SteerID      string     `json:"steerId,omitempty"`
-	AgentKey     string     `json:"agentKey,omitempty"`
+	// RequireNoAwaiting is Runtime-issued; media input cannot replace a waiting item.
+	RequireNoAwaiting bool       `json:"-"`
+	ModelMessage      string     `json:"-"`
+	Mail              *MailInput `json:"-"`
+	RequestID         string     `json:"requestId,omitempty"`
+	ChatID            string     `json:"chatId,omitempty"`
+	RunID             string     `json:"runId"`
+	SteerID           string     `json:"steerId,omitempty"`
+	AgentKey          string     `json:"agentKey,omitempty"`
 
 	Message    string      `json:"message"`
 	References []Reference `json:"references,omitempty"`

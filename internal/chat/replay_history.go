@@ -34,6 +34,10 @@ func replayChatHistory(summary Summary, lines []map[string]any, rawMessages []ma
 		return Detail{}, err
 	}
 	lastRunID, lastRunUsage := latestReplayRunUsage(r.runs, r.runOrder)
+	voiceChat, voiceByRun, err := voiceUsageTotals(r.voiceUsage)
+	if err != nil {
+		return Detail{}, err
+	}
 
 	var plan *PlanState
 	if snapshot, err := plantasks.LoadLatest(r.chatDir); err != nil {
@@ -49,9 +53,11 @@ func replayChatHistory(summary Summary, lines []map[string]any, rawMessages []ma
 		Events:        allEvents,
 		ContextWindow: r.latestContextWindow,
 		ReplayUsage: ReplayUsage{
-			LastRunID: lastRunID,
-			LastRun:   lastRunUsage,
-			Chat:      r.usage,
+			LastRunID:  lastRunID,
+			LastRun:    lastRunUsage,
+			Chat:       r.usage,
+			VoiceChat:  voiceChat,
+			VoiceByRun: voiceByRun,
 		},
 		Plan:     plan,
 		Planning: r.planning,
@@ -74,6 +80,7 @@ type historyReplay struct {
 	planning            *PlanningState
 	latestContextWindow map[string]any
 	usage               UsageData
+	voiceUsage          map[string]VoiceUsage
 }
 
 func (r *historyReplay) nextSeq() int64 { r.seq++; return r.seq }

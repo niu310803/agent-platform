@@ -646,7 +646,7 @@ func (s *Service) ControlManage(ctx context.Context, c ControlCaller, action str
 		if archived {
 			e = s.Archives.DeleteArchived(id)
 		} else {
-			e = s.DeleteChat(id)
+			e = s.DeleteChatLocked(id)
 		}
 		if e != nil {
 			return nil, e

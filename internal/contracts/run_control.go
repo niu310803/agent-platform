@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -559,6 +560,9 @@ func (c *RunControl) enqueueSteer(req api.SteerRequest) (bool, error) {
 	if c.interrupted.Load() || c.finished.Load() || c.steerClosed {
 		return false, nil
 	}
+	if req.RequireNoAwaiting && len(c.awaitingSubmits) > 0 {
+		return false, ErrSteerAwaitingPending
+	}
 	if len(req.References) > 0 && len(req.PreparedMessages) != 1 {
 		return false, nil
 	}
@@ -964,6 +968,19 @@ func (c *RunControl) ResolveSubmit(req api.SubmitRequest) SubmitAck {
 		return SubmitAck{Accepted: false, Status: "already_resolved", SubmitID: firstNonBlankSubmitID(resolved.Request.SubmitID, req.SubmitID), Detail: detail}
 	}
 	awaiting := c.awaitingSubmits[awaitingID]
+	if req.RequireVoiceQuestion {
+		valid := awaiting.Mode == "question" && awaiting.QuestionDraft != nil && len(awaiting.Questions) > 0 && len(awaiting.QuestionDraft.Answers) == len(awaiting.Questions)
+		for _, raw := range awaiting.Questions {
+			q, _ := raw.(map[string]any)
+			if strings.EqualFold(strings.TrimSpace(AnyStringNode(q["type"])), "password") {
+				valid = false
+			}
+		}
+		if !valid {
+			c.mu.Unlock()
+			return SubmitAck{Status: "invalid", SubmitID: req.SubmitID, Detail: "Voice submission requires the current complete ordinary question draft"}
+		}
+	}
 	if len(awaiting.ExactApprovalIDs) > 0 {
 		items, err := queryinput.DecodeSubmitParams(req.Params)
 		valid := err == nil && len(items) == len(awaiting.ExactApprovalIDs)
@@ -1177,6 +1194,10 @@ func (c *RunControl) expectSubmit(ctx AwaitingSubmitContext) bool {
 	}
 	if existing, ok := c.awaitingSubmits[ctx.AwaitingID]; ok && existing.SteerReplan {
 		ctx.SteerReplan = true
+	}
+	ctx.QuestionDraft = nil // Only UpdateQuestionDraft may create answers.
+	if existing, ok := c.awaitingSubmits[ctx.AwaitingID]; ok && existing.Mode == "question" && ctx.Mode == "question" && reflect.DeepEqual(existing.Questions, ctx.Questions) {
+		ctx.QuestionDraft = CloneQuestionDraft(existing.QuestionDraft)
 	}
 	if existing, ok := c.awaitingSubmits[ctx.AwaitingID]; ok && len(ctx.Summaries) == 0 {
 		ctx.Summaries = append([]ApprovalSummary(nil), existing.Summaries...)

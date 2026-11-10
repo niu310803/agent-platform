@@ -33,7 +33,10 @@ func Snapshot(runs contracts.RunManager, chats chat.Store, runID string) (contra
 		CompletedAt: status.CompletedAt,
 		Origin:      CloneRunOrigin(status.RunOrigin),
 	}
-	if status.State == contracts.RunLoopStateWaitingSubmit {
+	// ExpectSubmit is published before the tool enters its blocking wait.
+	// The registered waiter is already actionable during that short interval;
+	// do not hide it behind a later loop-state transition.
+	if status.CompletedAt == 0 {
 		if lister, ok := runs.(contracts.ActiveAwaitingLister); ok {
 			waiters := lister.ActiveAwaitings(runID)
 			sort.Slice(waiters, func(i, j int) bool { return publicAwaitingID(waiters[i]) < publicAwaitingID(waiters[j]) })
@@ -53,6 +56,7 @@ func Snapshot(runs contracts.RunManager, chats chat.Store, runID string) (contra
 				}
 				if awaiting.Mode == "question" {
 					snapshot.Awaiting.Questions = append([]any(nil), awaiting.Questions...)
+					snapshot.Awaiting.QuestionDraft = contracts.CloneQuestionDraft(awaiting.QuestionDraft)
 				}
 			}
 		}

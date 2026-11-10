@@ -1274,7 +1274,18 @@ type ChatReadState struct {
 
 type Awaiting = queryinput.Awaiting
 
+type VoiceUsage struct {
+	Tasks              int            `json:"tasks"`
+	UnknownTasks       int            `json:"unknownTasks"`
+	PendingTasks       int            `json:"pendingTasks"`
+	UnpricedTasks      int            `json:"unpricedTasks"`
+	Characters         int            `json:"characters"`
+	BilledAudioSeconds float64        `json:"billedAudioSeconds"`
+	EstimatedCost      *EstimatedCost `json:"estimatedCost,omitempty"`
+}
+
 type ChatUsageData struct {
+	Voice                   *VoiceUsage             `json:"voice,omitempty"`
 	ModelKey                string                  `json:"modelKey,omitempty"`
 	PromptTokens            int                     `json:"promptTokens"`
 	CompletionTokens        int                     `json:"completionTokens"`
