@@ -274,7 +274,7 @@ func (p *Package) normalizeLegacyComponents() error {
 					if p.AuthMode == AuthMCP {
 						variables = map[string]bool{"ACCESS_TOKEN": true}
 					} else if p.AuthMode == AuthOneID {
-						variables = map[string]bool{shellenv.EnvIDToken: true}
+						variables = map[string]bool{shellenv.EnvIDToken: true, "ONEID_TOKEN": true}
 					}
 				} else if p.AuthMode == AuthMCP {
 					template = strings.ReplaceAll(template, "${ACCESS_TOKEN}", "${"+EnvOAuthAccessToken+"}")

@@ -42,10 +42,10 @@ func writeOneIDFixture(t *testing.T, root string, component map[string]any) conn
 }
 
 func TestOneIDHTTPUsesCurrentEnvironmentAndBoundDestination(t *testing.T) {
-	for _, template := range []string{"Bearer ${AP_ID_TOKEN}", ""} {
+	for _, template := range []string{"Bearer ${AP_ID_TOKEN}", "Bearer ${ONEID_TOKEN}", ""} {
 		t.Run(template, func(t *testing.T) {
 			root := t.TempDir()
-			pkg := writeOneIDFixture(t, root, map[string]any{"type": "streamableHttp", "url": "https://example.test/mcp/", "headers": map[string]any{"X-SSO": "${AP_ID_TOKEN}"}})
+			pkg := writeOneIDFixture(t, root, map[string]any{"type": "streamableHttp", "url": "https://example.test/mcp/", "headers": map[string]any{"X-SSO": "${AP_ID_TOKEN}", "X-SSO-Alias": "${ONEID_TOKEN}"}})
 			if template != "" {
 				pkg.MCP["main"]["headers"].(map[string]any)["Authorization"] = template
 			}
@@ -63,7 +63,7 @@ func TestOneIDHTTPUsesCurrentEnvironmentAndBoundDestination(t *testing.T) {
 			calls := 0
 			base := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 				calls++
-				if req.Header.Get("Authorization") != "Bearer "+expected || req.Header.Get("X-SSO") != expected {
+				if req.Header.Get("Authorization") != "Bearer "+expected || req.Header.Get("X-SSO") != expected || req.Header.Get("X-SSO-Alias") != expected {
 					t.Error("wrong SSO environment")
 				}
 				return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
@@ -112,7 +112,7 @@ func TestOneIDStdioInjectionRotationAndLogout(t *testing.T) {
 	root := t.TempDir()
 	pkg := writeOneIDFixture(t, root, map[string]any{
 		"type": "stdio", "command": os.Args[0], "args": []string{"-test.run=^TestOneIDStdioHelperProcess$"},
-		"env": map[string]any{"AP_ONEID_TEST_HELPER": "1", "SERVICE_TOKEN": "${AP_ID_TOKEN}"},
+		"env": map[string]any{"AP_ONEID_TEST_HELPER": "1", "SERVICE_TOKEN": "${AP_ID_TOKEN}", "ONEID_TOKEN": "${ONEID_TOKEN}"},
 	})
 	registry, err := NewRegistry(root)
 	if err != nil {
@@ -197,7 +197,7 @@ func TestOneIDStdioHelperProcess(t *testing.T) {
 	generation := map[string]string{"identity-a": "a", "identity-b": "b"}[token]
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "oneid-test", Version: "1.0.0"}, nil)
 	server.AddTool(&sdkmcp.Tool{Name: "check_identity", InputSchema: json.RawMessage(`{"type":"object"}`)}, func(context.Context, *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
-		value := map[string]any{"pid": os.Getpid(), "generation": generation, "matches": token != "" && token == os.Getenv("SERVICE_TOKEN")}
+		value := map[string]any{"pid": os.Getpid(), "generation": generation, "matches": token != "" && token == os.Getenv("SERVICE_TOKEN") && token == os.Getenv("ONEID_TOKEN")}
 		return &sdkmcp.CallToolResult{StructuredContent: value}, nil
 	})
 	if err := server.Run(context.Background(), &sdkmcp.StdioTransport{}); err != nil {
@@ -215,12 +215,13 @@ func TestOneIDLocalValidationAndLegacyClassification(t *testing.T) {
 		{"type": "streamableHttp", "url": "https://example.test/mcp", "headers": map[string]any{"X-Key": "${OTHER_TOKEN}"}},
 		{"type": "stdio", "command": os.Args[0], "env": map[string]any{"AP_ID_TOKEN": "fixed"}},
 		{"type": "stdio", "command": os.Args[0], "env": map[string]any{"TOKEN": "${AP_ACCESS_TOKEN}"}},
-		{"type": "stdio", "command": os.Args[0], "env": map[string]any{"TOKEN": "${ONEID_TOKEN}"}},
-		{"type": "streamableHttp", "url": "https://example.test/mcp", "headers": map[string]any{"X-Key": "${ONEID_TOKEN}"}},
+		{"type": "stdio", "command": os.Args[0], "env": map[string]any{"TOKEN": "${ID_TOKEN}"}},
+		{"type": "streamableHttp", "url": "https://example.test/mcp", "headers": map[string]any{"X-Key": "${ID_TOKEN}"}},
 		{"type": "streamableHttp", "url": "https://example.test/mcp", "headers": map[string]any{"X-Key": "${AP_ACCESS_TOKEN}"}},
 		{"type": "streamableHttp", "url": "https://example.test/mcp", "headers": map[string]any{"Authorization": "Bearer ${AP_ACCESS_TOKEN}"}},
-		{"type": "streamableHttp", "url": "https://example.test/mcp", "headers": map[string]any{"Authorization": "Bearer ${ONEID_TOKEN}"}},
+		{"type": "streamableHttp", "url": "https://example.test/mcp", "headers": map[string]any{"Authorization": "Bearer ${ID_TOKEN}"}},
 		{"type": "streamableHttp", "url": "https://example.test/mcp", "headers": map[string]any{"Authorization": "Bearer ${AP_ID_TOKEN} suffix"}},
+		{"type": "streamableHttp", "url": "https://example.test/mcp", "headers": map[string]any{"Authorization": "Bearer ${ID_TOKEN} suffix"}},
 		{"type": "streamableHttp", "url": "https://example.test/mcp", "headers": map[string]any{"Authorization": "Bearer ${ONEID_TOKEN} suffix"}},
 		{"type": "streamableHttp", "url": "https://example.test/mcp", "staticHeaders": map[string]any{"Authorization": "Bearer ${ONEID_TOKEN}"}},
 	} {

@@ -452,7 +452,7 @@ func (c *Client) transportWithIdentity(server ServerDefinition, identity map[str
 		if server.ConnectorOneID {
 			env = map[string]string{}
 			for key, value := range server.Env {
-				resolved, err := resolveConnectorCredential(connector.Package{Manifest: connector.Manifest{ID: server.ConnectorID}}, value, identity)
+				resolved, err := resolveConnectorCredential(connector.Package{Manifest: connector.Manifest{ID: server.ConnectorID}}, connector.NormalizeOneIDTemplate(value), identity)
 				if err != nil {
 					return nil, fmt.Errorf("oneid environment requires AP_ID_TOKEN")
 				}
@@ -648,7 +648,7 @@ func (t headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 	for key, value := range t.headers {
 		if t.oneID {
 			var err error
-			value, err = resolveConnectorCredential(connector.Package{}, value, identity)
+			value, err = resolveConnectorCredential(connector.Package{}, connector.NormalizeOneIDTemplate(value), identity)
 			if err != nil {
 				return nil, fmt.Errorf("oneid header requires AP_ID_TOKEN")
 			}

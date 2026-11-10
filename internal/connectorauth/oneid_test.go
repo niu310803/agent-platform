@@ -57,7 +57,7 @@ func TestOneIDStatusFollowsDesktopWithoutPersistingCredentials(t *testing.T) {
 func TestOneIDExecutionEnvironmentRequiresCurrentIdentityWithOrWithoutTemplates(t *testing.T) {
 	t.Setenv(agentconfig.EnvIDToken, "untrusted-process-token")
 	file := filepath.Join(t.TempDir(), "sso-id-token.txt")
-	for _, templates := range []map[string]string{nil, {"SERVICE_TOKEN": "Bearer ${AP_ID_TOKEN}"}} {
+	for _, templates := range []map[string]string{nil, {"SERVICE_TOKEN": "Bearer ${AP_ID_TOKEN}"}, {"SERVICE_TOKEN": "Bearer ${ONEID_TOKEN}"}} {
 		binding := connector.CredentialEnvironment{ID: "demo", Mode: connector.AuthOneID, Env: templates}
 		for _, token := range []string{"identity-a", "identity-b"} {
 			if err := os.WriteFile(file, []byte(token), 0600); err != nil {

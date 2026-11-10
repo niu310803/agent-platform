@@ -201,12 +201,12 @@ func connectorServer(pkg connector.Package, name string) (ServerDefinition, erro
 					return ServerDefinition{}, fmt.Errorf("%s values must be strings", field)
 				}
 				if pkg.AuthMode == connector.AuthOneID {
-					resolved, err := resolveConnectorCredential(pkg, value, map[string]string{agentconfig.EnvIDToken: "identity"})
+					resolved, err := resolveConnectorCredential(pkg, connector.NormalizeOneIDTemplate(value), map[string]string{agentconfig.EnvIDToken: "identity"})
 					if err != nil || strings.Contains(resolved, "${") {
-						return ServerDefinition{}, fmt.Errorf("oneid only supplies AP_ID_TOKEN")
+						return ServerDefinition{}, fmt.Errorf("oneid only supplies AP_ID_TOKEN and ONEID_TOKEN")
 					}
-					if field == "headers" && strings.EqualFold(key, "Authorization") && value != "Bearer ${AP_ID_TOKEN}" {
-						return ServerDefinition{}, fmt.Errorf("oneid manages Authorization; omit it or use Bearer ${AP_ID_TOKEN}")
+					if field == "headers" && strings.EqualFold(key, "Authorization") && connector.NormalizeOneIDTemplate(value) != "Bearer ${AP_ID_TOKEN}" {
+						return ServerDefinition{}, fmt.Errorf("oneid manages Authorization; omit it or use Bearer ${AP_ID_TOKEN} or Bearer ${ONEID_TOKEN}")
 					}
 				}
 				normalized := key

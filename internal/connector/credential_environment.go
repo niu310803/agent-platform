@@ -3,6 +3,7 @@ package connector
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // CredentialEnvironment is frozen into a run without resolving secret values.
@@ -51,4 +52,10 @@ func (p Package) validateAuthDeclarations() error {
 	}
 	_, err := p.cliEnvironment()
 	return err
+}
+
+// NormalizeOneIDTemplate maps the public ONEID_TOKEN alias to the managed identity
+// source. Call only for oneid: token schemas may define their own ONEID_TOKEN.
+func NormalizeOneIDTemplate(template string) string {
+	return strings.ReplaceAll(template, "${ONEID_TOKEN}", "${AP_ID_TOKEN}")
 }

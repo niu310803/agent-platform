@@ -80,7 +80,7 @@ func (p Package) credentialVariables() map[string]bool {
 	case AuthMCP:
 		return map[string]bool{EnvOAuthAccessToken: true}
 	case AuthOneID:
-		return map[string]bool{shellenv.EnvIDToken: true}
+		return map[string]bool{shellenv.EnvIDToken: true, "ONEID_TOKEN": true}
 	}
 	return nil
 }
@@ -162,6 +162,9 @@ func (p Package) CLICredentialTemplates() (map[string]string, error) {
 			return nil, err
 		}
 		value = strings.ReplaceAll(value, "${"+EnvOAuthAccessToken+"}", "${ACCESS_TOKEN}")
+		if p.AuthMode == AuthOneID {
+			value = NormalizeOneIDTemplate(value)
+		}
 		result[key] = value
 	}
 	if len(result) == 0 {

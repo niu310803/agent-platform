@@ -154,6 +154,7 @@ KBX 索引固定使用 `ru-kbases/<libraryId>/index.sqlite` 及配套存储；Ag
 - Desktop 域工具（desktop_shell/settings/site/webapp/service/market/kanban）的动作登记在 `internal/connector/control_actions.go`，跟随 `desktop/src/shared/desktop-actions.ts`，排除仅限 WebApp page 的动作；相邻仓库存在时工具测试直接核对上游定义，CI 可通过 `DESKTOP_SOURCE` 指定 checkout，见 [MCP与工具交互](docs/MCP与工具交互.md)。
 - 连接器包版本由资源发布方维护；Platform 不根据来源市场或重新打包动作推断版本，不用 CLI 或 Skill 版本替代连接器版本。具体服务适配应留在连接器资源包，项目文档只描述通用契约。
 - 启动、热重载与目录枚举按连接器隔离无效包，记录 warning 后继续；MCP 本地定义失败仅跳过对应包或挂载的路由，同包组件不得部分发布。目录根遍历失败仍返回错误，管理目录保留无效包的 invalid 状态及错误原因；单包读取、定义保存与本次导入目标保持严格校验，ZIP/MCP 地址导入隔离其他无效已安装包，仅与健康包检查冲突，见 [连接器](docs/连接器.md)。
+- oneid 的 CLI env、stdio env 与 HTTP 动态 Header 凭据模板同时支持 `${AP_ID_TOKEN}` 和 `${ONEID_TOKEN}`，均读取同一份 SSO ID token；默认注入变量仍为 `AP_ID_TOKEN`，`ONEID_TOKEN` 需连接器显式 env 映射。
 - `connector.json.authMode` 取值为 none/self/token/mcp/oneid，`oauth`（即 mcp）与 `oneid-token` 是长期别名，读取时归一；独立 OAuth 模式已删除，`oauth` 块只承载 MCP 授权设置，显式授权/Token 端点报错，旧独立 OAuth grant 不复用。MCP 授权发现以未认证 initialize 的 Bearer 挑战为准、well-known 兜底，不用 GET 探测；`/api/connectors/check` 与 `checkConnector` 对未授权 mcp 组件执行不登录、不注册的发现。见 [连接器安装与授权](docs/连接器安装与授权.md#mcp-标准授权)。
 - 本版本临时兼容改造前 `connector.json` 的蛇形字段、认证值、内联 Token 表单与 auth_bindings，读取时在 `internal/connector/manifest_compat.go` 统一转换，不改写原包，管理摘要使用当前格式；旧 `auth_mode:none` 仍表示 self。下个版本按统一标记 `TODO(connector-compat)` 删除兼容层及逐组件 OAuth/CLI grant 适配，并清理对应测试与文档，规则及移除清单见 [清单临时兼容](docs/连接器.md#清单临时兼容下个版本移除)。不恢复旧目录迁移或旧 API。
 - kbase-control 提供 list/search/files/read/status，四个检索工具均必填 libraryId；索引由知识库服务自动维护，Agent 侧没有刷新工具或接口。查询预算不改变库索引范围。

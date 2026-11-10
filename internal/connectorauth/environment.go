@@ -96,6 +96,9 @@ func ResolveEnvironmentWithRevision(ctx context.Context, d connector.CredentialE
 	}
 	env := map[string]string{}
 	for name, template := range d.Env {
+		if d.Mode == connector.AuthOneID {
+			template = connector.NormalizeOneIDTemplate(template)
+		}
 		value, err := connector.ResolveAuthTemplate(template, values)
 		if err != nil || strings.ContainsAny(value, "\x00\r\n") {
 			return nil, "", fmt.Errorf("connector %s requires valid credentials: %w", d.ID, ErrTokenRejected)
