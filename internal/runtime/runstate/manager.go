@@ -276,6 +276,14 @@ func (m *Manager) LookupAwaiting(runID string, awaitingID string) (contracts.Awa
 	return control.LookupAwaiting(awaitingID)
 }
 
+func (m *Manager) UpdateQuestionDraft(runID, awaitingID string, answer map[string]any, normalize func(map[string]any, map[string]any) (any, error)) (*queryinput.QuestionDraft, error) {
+	control, ok := m.lookupControl(runID)
+	if !ok {
+		return nil, contracts.ErrQuestionDraftUnavailable
+	}
+	return control.UpdateQuestionDraft(awaitingID, answer, normalize)
+}
+
 func (m *Manager) ActiveAwaitings(runID string) []contracts.AwaitingSubmitContext {
 	control, ok := m.lookupControl(runID)
 	if !ok {
@@ -314,6 +322,9 @@ func (m *Manager) Steer(req api.SteerRequest) contracts.SteerAck {
 	}
 	req.SteerID = steerID
 	accepted, err := control.PrepareAndEnqueueSteer(req)
+	if errors.Is(err, contracts.ErrSteerAwaitingPending) {
+		return contracts.SteerAck{Status: "awaiting_pending", SteerID: steerID, Detail: err.Error()}
+	}
 	if err != nil {
 		return contracts.SteerAck{Accepted: false, Status: "invalid_reference", SteerID: steerID, Detail: err.Error()}
 	}

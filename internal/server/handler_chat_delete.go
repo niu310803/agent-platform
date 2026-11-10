@@ -9,6 +9,7 @@ import (
 	"agent-platform/internal/api"
 	"agent-platform/internal/chat"
 	"agent-platform/internal/contracts"
+	"agent-platform/internal/conversation"
 )
 
 func (s *Server) handleChatDelete(w http.ResponseWriter, r *http.Request) {
@@ -48,8 +49,11 @@ func (s *Server) handleChatDelete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := s.conversationService().DeleteChat(chatID); errors.Is(err, chat.ErrChatNotFound) {
+	if err := s.conversationService().DeleteChatLocked(chatID); errors.Is(err, chat.ErrChatNotFound) {
 		writeJSON(w, http.StatusNotFound, api.Failure(http.StatusNotFound, "chat not found"))
+		return
+	} else if errors.Is(err, conversation.ErrVoiceUsagePending) {
+		writeJSON(w, http.StatusConflict, api.Failure(http.StatusConflict, err.Error()))
 		return
 	} else if err != nil {
 		writeJSON(w, http.StatusInternalServerError, api.Failure(http.StatusInternalServerError, err.Error()))

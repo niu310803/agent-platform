@@ -20,6 +20,7 @@ import (
 )
 
 type ProxyEventRecorder struct {
+	persistedAt       time.Time
 	runtimeEvent      func(stream.EventData)
 	fullText          *FullTextBuilder
 	errorPayload      map[string]any
@@ -537,6 +538,7 @@ func (r *ProxyEventRecorder) Finish() (bool, chat.RunCompletion) {
 	if r == nil {
 		return false, chat.RunCompletion{}
 	}
+	r.persistedAt = time.Time{}
 	if r.stepWriter != nil {
 		r.stepWriter.Flush()
 	}
@@ -566,5 +568,6 @@ func (r *ProxyEventRecorder) Finish() (bool, chat.RunCompletion) {
 		// even when storage rejects a historic/invalid record.
 		return false, completion
 	}
+	r.persistedAt = time.Now()
 	return true, completion
 }

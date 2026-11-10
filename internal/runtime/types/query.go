@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"time"
 
 	"agent-platform/internal/chat"
 	"agent-platform/internal/contracts"
@@ -116,6 +117,9 @@ type QueryHooks struct {
 }
 
 type QueryResult struct {
+	// PersistedAt is process-local timing, captured after successful storage.
+	// It is neither a wire timestamp nor an additional playback permission.
+	PersistedAt time.Time `json:"-"`
 	// Persisted reports whether Completion was accepted by the ordinary Chat store.
 	// Completion is also returned on storage failure for diagnostics.
 	Persisted    bool

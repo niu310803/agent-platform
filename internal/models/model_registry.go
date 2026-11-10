@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -89,6 +90,7 @@ const (
 	ProtocolDashScopeRealtimeTTS = "DASHSCOPE_REALTIME_TTS"
 
 	PricingUnitPer10KCharacters = "per_10k_characters"
+	PricingUnitPerSecond        = "per_second"
 )
 
 // TTSProtocols lists the speech protocols implemented by speech_generate.
@@ -135,14 +137,15 @@ const (
 )
 
 type ModelPricing struct {
-	Currency       string
-	Unit           string
-	InputCacheHit  float64
-	InputCacheMiss float64
-	Output         float64
+	Currency       string  `json:"currency"`
+	Unit           string  `json:"unit"`
+	InputCacheHit  float64 `json:"inputCacheHit,omitempty"`
+	InputCacheMiss float64 `json:"inputCacheMiss,omitempty"`
+	Output         float64 `json:"output,omitempty"`
 	// Characters is the price per 10k provider-billed characters; it applies
 	// only with unit per_10k_characters.
-	Characters float64
+	Characters float64 `json:"characters,omitempty"`
+	Seconds    float64 `json:"seconds,omitempty"`
 }
 
 type ModelRegistry struct {
@@ -261,6 +264,21 @@ func ValidateModelTypeProtocol(modelType string, protocol string) error {
 // unit, and that tts models are not priced per token.
 func ValidateModelPricing(pricing ModelPricing, modelType string) error {
 	tokenPriced := pricing.InputCacheHit > 0 || pricing.InputCacheMiss > 0 || pricing.Output > 0
+	if pricing.Unit == PricingUnitPerSecond {
+		if pricing.Seconds <= 0 || math.IsNaN(pricing.Seconds) || math.IsInf(pricing.Seconds, 0) {
+			return fmt.Errorf("pricing.seconds must be finite and greater than 0 for unit %s", PricingUnitPerSecond)
+		}
+		if pricing.InputCacheHit != 0 || pricing.InputCacheMiss != 0 || pricing.Output != 0 || pricing.Characters != 0 || modelType != ModelTypeASR {
+			return fmt.Errorf("pricing unit %s requires type: asr and only pricing.seconds", PricingUnitPerSecond)
+		}
+		return nil
+	}
+	if pricing.Seconds != 0 {
+		return fmt.Errorf("pricing.seconds requires unit %s", PricingUnitPerSecond)
+	}
+	if modelType == ModelTypeASR && (tokenPriced || pricing.Characters > 0) {
+		return fmt.Errorf("type: asr pricing must use unit %s", PricingUnitPerSecond)
+	}
 	if pricing.Unit == PricingUnitPer10KCharacters {
 		if pricing.Characters <= 0 {
 			return fmt.Errorf("pricing.characters must be greater than 0 for unit %s", PricingUnitPer10KCharacters)
@@ -1017,6 +1035,7 @@ func ParseModelPricing(raw any) ModelPricing {
 		InputCacheMiss: floatNode(values["inputCacheMiss"]),
 		Output:         floatNode(values["output"]),
 		Characters:     floatNode(values["characters"]),
+		Seconds:        floatNode(values["seconds"]),
 	}
 }
 

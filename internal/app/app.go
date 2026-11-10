@@ -428,7 +428,7 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 		def, ok := registry.AgentDefinition(key)
 		return ok && def.Mode == catalog.AgentModeBot
 	}
-	voiceService := voice.NewService(backgroundCtx, voice.Dependencies{Config: cfg.Voice, Models: modelRegistry, Runtime: runtimeService, Chats: chatStore, Agents: registry, Runs: runManager})
+	voiceService := voice.NewService(backgroundCtx, voice.Dependencies{Billing: cfg.Billing, Usage: conversationService, Config: cfg.Voice, Models: modelRegistry, Runtime: runtimeService, Chats: chatStore, Agents: registry, Runs: runManager})
 	cleanupVoice := true
 	defer func() {
 		if cleanupVoice {

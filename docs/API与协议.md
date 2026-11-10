@@ -773,78 +773,103 @@ Agent 编辑选项与 ACP 模型选项中的 `contextWindow` 是 API 响应字�
 
 HITL 三态细节见 [HITL协议](HITL协议.md)。真流式、heartbeat、attach backlog 与 H2A 缓冲见 [真流式和H2A](真流式和H2A.md)。
 
-### 实时语音 v1
+### 实时语音 v2
+
+Platform 与 WebClient 统一使用版本 2；旧版 hello 明确拒绝，不降级或轮流尝试协议。当前已落地媒体边界、按键／全双工入口、本地执行中 Steer 分流及完整 question 草稿／Submit；approval、planning 和 form 始终转原界面。真实声学与部署仍待验收。
 
 `GET /api/voice/capabilities` 按 `{code,msg,data}` 返回本地能力，不探测供应商：
 
 ```json
-{"enabled":true,"reason":"","version":1,"websocketPath":"/api/voice/ws",
+{"enabled":true,"reason":"","version":2,"websocketPath":"/api/voice/ws",
  "input":{"codecs":["pcm_s16le"],"sampleRate":16000,"channels":1},
  "output":{"codecs":["pcm_s16le"],"sampleRates":[16000,24000]},
  "voices":[{"id":"longanyang","label":"longanyang"}],"defaultVoice":"longanyang"}
 ```
 
+`input.codecs` 在已启用且 ASR 的 modelId 为经过真实验证的 `paraformer-realtime-v2` 时增加 `opus`；其他模型仍仅公布 PCM。Opus 输入每条 WS binary message 必须恰好一个原始 packet，不能传 Ogg 页、拼接多个包或切分压缩包；TOC 实际时长为 2.5～120ms，单包最多 65536 bytes。`preSkip48k` 为终端编码器的实际预跳过样本数（固定 48kHz 单位，0～65535，省略为 0），不是按输入采样率解释，也不替客户端猜测固定值。Platform 只用纯 Go 包装 Ogg，保留包字节、CRC／跨页／连续 granule／EOS，不编解码或重采样。服务端 hello 回显实际 input/output。
+
+启动队列同时限制 11 秒实际音频及 352000 bytes；单次录音同时限制 60 秒和 1920000 bytes。PCM 按样本计算，Opus 按 TOC 计算；共同路径不按压缩字节估算时长。WS 文本控制仍最多 16KiB。Opus writer 为最后一包设置 EOS，至多持有一个包（最多 120ms）；自动结束时排空已接收输入并发出真实尾包，不制造静音包。空录音不创建 Query。
+
+2026-11-07 的 CosyVoice Opus 16k／24k 实测虽返回 Ogg，但连续 granule 与实际包时长不符且无 EOS，严格解析器明确拒绝；因此 **不公布也不接受 Opus output**，不做隐式修复。原浏览器仍使用 PCM，没有引入浏览器 Opus 库。证据见本轮 T07 记录。
+
 voice 默认关闭；未启用或模型未配置时 `enabled:false`，`reason` 给出原因。`voices` 来自 `voice.voices`，label 当前等于 id。
 
-`GET /api/voice/ws` 复用普通 JWT Bearer/cookie，浏览器可用既有 `bearer.<token>` 子协议，带 Origin 必须同源或命中部署 CORS allowlist；此入口不读取 URL token。文本帧是 JSON 控制消息（未知字段拒绝），二进制帧是裸 PCM，主 `/ws` 不收音频。
+`GET /api/voice/ws` 复用普通 JWT Bearer/cookie，浏览器可用既有 `bearer.<token>` 子协议，带 Origin 必须同源或命中部署 CORS allowlist；此入口不读取 URL token。文本帧是 JSON 控制消息，二进制帧按协商格式上传裸 PCM 或单个完整 Opus packet，下行仍为裸 PCM，主 `/ws` 不收音频。字段按消息类型严格校验，包括大小写和嵌套音频字段；旧 mode、无关字段、未知消息及尾随 JSON 均拒绝。
 
 客户端 → 服务端：
 
 | type | 字段 | 说明 |
 |---|---|---|
-| hello | version:1, agentKey, chatId?, newChat?, primary?, voice?, audio.input{codec,sampleRate,channels,frameMs}, audio.output{codec,sampleRate,channels?,frameMs?} | 连接后 10 秒内的首帧。input 固定 pcm_s16le/16000/1/20；output 为 pcm_s16le 的 16000 或 24000。voice 省略取默认，须在 voices 内 |
-| listen | state:start/stop, mode:auto/manual | start 开启新一轮收音；auto 由服务端按句尾静音判定说完，manual 以 stop 结束 |
-| abort | reason? | 打断当前轮 |
+| hello | version:2, agentKey, timeZone, chatId?, newChat?, primary?, voice?, audio.input{codec,sampleRate,channels,frameMs?,preSkip48k?}, audio.output{codec,sampleRate,channels?,frameMs?} | 连接后 10 秒内的首帧。timeZone 为有效 IANA 时区（不接受 Local）；用于后续日期解释，不参与授权。input 为 pcm_s16le/16000/1/20，或能力允许时 opus/16000/1（不声明 frameMs）；output 为 pcm_s16le 的 16000 或 24000 |
+| listen | state:start, requestId, turn, intent:conversation/question, runId?, awaitingId?, questionId? | turn 从 1 严格递增。question 必须绑定三个 ID，校验本连接 ownedRun 与 Runtime 当前题目，拒绝密码及过期绑定；conversation 不接受这些 ID |
+| listen | state:stop, requestId, turn | 只提前结束对应收音，必须匹配当前 start；自动句尾结束仍为默认 |
+| abort | reason? | 显式停止本连接受理的任务，经原 Runtime Interrupt 取消；不自动开始新收音 |
+| close | 无 | 只结束媒体，不取消 Run |
 
 服务端 → 客户端：
 
 | type | 字段 | 说明 |
 |---|---|---|
-| hello | version, sessionId, agentKey, chatId, audio.output{codec,sampleRate,channels:1,frameMs:20} | 握手成功 |
-| stt | turn, text, final | 识别中间结果与整句定稿；非空定稿后提交 Query，空定稿只结束本次识别，客户端可继续收听 |
-| run | turn, state:start/end, runId, chatId, finishReason? | start 与 end 之间显示思考中 |
-| awaiting | turn, runId, awaitingId, mode | Run 等待人工，随后朗读固定提示语 |
-| tts | turn, state:start/stop, text?, reason? | start 携带朗读全文，其后的二进制帧属于该轮；stop 的 reason 为 done/error，只表示音频发完，不代表客户端播完 |
-| abort | turn | 打断确认 |
-| error | turn, code, msg | 见下方错误码；hello 前 turn 为 0，之后只作用于对应轮次 |
+| hello | version:2, sessionId, agentKey, chatId, audio.output | 握手成功 |
+| listen.ready | requestId, turn | 旧音频与新输入的边界；回显对应 start。旧轮 PCM 不会排到此帧之后 |
+| stt | turn, text, final, pendingResult? | task-finished 后才是定稿。空输入若有保留结果，pendingResult:true 表示等待该结果，不能自动抢先开下一轮 |
+| steer | state:accepted, turn, requestId, steerId, runId | 当前定稿已进入原 Run 的补充队列；不是工具撤回或消费完成 |
+| run | state:start/end, runId, chatId, finishReason? | 按 Run 身份更新，不携带或依赖媒体 turn |
+| awaiting | state:ask/resolved, runId, awaitingId, mode?, questionId?, handoff? | question 的 ask 给出当前普通题 ID；handoff:true 停止语音收集并转原界面。resolved 不携带答案 |
+| tts | turn, speechId, purpose:final/question/notice, state:start/stop, text?, reason? | 二进制音频属于当前 speechId；stop.reason 为 done/error，只代表发送结束。question 提问排空后收取绑定的回答；notice 不自动收音 |
+| abort | turn | 取消请求的媒体隔离确认，不等于 Runtime 已释放 Chat |
+| error | turn, code, msg | 错误；握手及协议错误关闭媒体，不取消任务或重发输入 |
 
-服务端接受 listen start 时 turn 加 1，被拒绝的 listen start 不分配轮次。
+开始说话先在客户端立即静音、停旧播放，再发送 listen start。按键确认前只在本连接保存最多 500ms PCM；全双工另有最多 480ms 本地预录（总上限 980ms），确认后按原顺序发送短预录与实时音频，主动 stop 的短尾帧同样保序。ready 超过 5 秒、预录超限或错误确认都关闭媒体并提示，不能补录、降级或自动重发。服务端使用原单写事件循环，旧轮／旧 speech 回调丢弃且完成消费确认。
 
-音频：
+音频与最终正文：
 
-- 上行只在收音阶段接受，按实时节奏发送；每帧 640 字节（20ms），仅最后一帧可更短且须为偶数字节，短帧后再发报 `invalid_audio`。识别任务启动前（含失效复用连接的重连）服务端最多缓存 11 秒上行音频，启动后补发，超出返回 `audio_overflow`。单轮 PCM 与任务期限保留 60 秒，识别文本最多 4000 字。等待说话没有额外 10 秒限制；收到音频但整轮没有识别文字时，期限到达返回空定稿，不创建 Chat/Run。共用 ASR 由调用方控制任务期限，finish-task 后仍最多等待 10 秒。
-- 下行每帧 20ms，服务端按实时节奏发送，最多领先 `voice.downlink-lead-ms`；不做 ACK 流控，客户端自行起播缓冲。
-- 朗读文本在同一合成任务内按句分段提交，超长句在停顿处切分（每段最多 50 字）。CosyVoice 对单段音频有上限，超出部分静默丢弃，却仍报告整句结束和 task-finished；整段一次提交会截掉回答末尾。
-- 半双工：一次 listen 只产生一个定稿，收到 tts stop 并本地播完后再发 listen start。收音中重复的 start 忽略；轮次已进入运行、等待或朗读时返回 `turn_busy`。
+- 上行每帧 640 字节（20ms），仅尾帧可更短且须为偶数字节；短帧后再发报 invalid_audio。供应商启动前最多缓存约 11 秒上行；超限 audio_overflow。ASR heartbeat、单轮 60 秒、4000 字文本及 10 秒收尾期限保留。空定稿不创建 Chat／Run。
+- 下行每帧 20ms，按原实时节奏与 downlink-lead-ms 控制；保留播放器有界缓冲。TTS 同任务分句、50 字单段上限、800 字朗读截断和 900 字合成上限保留。
+- 最终正文仅由实际 QueryResult 的 Persisted、非空 Completion、complete 及无有效待处理项放行，并检查没有新活动 Run；content.delta/end、run.complete 都不是播放门槛。
+- 收音期间完成的 Run 最多保留一份结果；空输入后重查事实再播放，新输入或显式 abort 丢弃未播放旧结果。最终 speech.stop(done) 且本地尾部排空后自动继续收音；notice 排空不触发下一轮。
 
-打断：客户端立即本地静音、清空播放并发送 abort，此后丢弃音频和本轮消息，直到收到 abort 确认。服务端结束当前轮、丢弃等待提交的定稿，发起 Runtime Interrupt 取消本会话受理的 Run，并回发 `{"type":"abort","turn":N}`；事件循环是唯一写出口，确认之后不会再有旧轮音频。确认仅表示媒体隔离，不表示 Run 已释放；在途和已接受的 Interrupt 不重复发送，失败允许下一次显式 abort 重试。失败以当前有效轮的 `run_failed` 报告并丢弃待提交定稿；轮次空档中的失败保留至下一次 listen 后报告。客户端以确认中的 turn 校准下一轮。关闭连接不取消 Run，取消必须发 abort。
+会话与控制：一条 WS 绑定一个 Agent／Chat。hello.chatId 须属于该 Agent。newChat:true 与 chatId 互斥，只预分配 ID；primary 只与 newChat 同用，沿原 Query 准入和主要聊天规则。未指定 Chat 时复用主要聊天或首轮条件补建；主要聊天被他处设置则报 chat_changed。Query 的 RequestID 与 Steer 的 RequestID／SteerID 固定为 `voice:<sessionId>:<turn>`；不新增 Agent mode、隐藏提示或权限覆盖。
 
-会话与 Run：一条 WS 绑定一个 Agent/Chat。hello 的 chatId 须属于该 Agent。显式 `newChat:true` 与非空 chatId 互斥，握手只预分配新 ID，首个非空 ASR 定稿经普通 Query 创建；空定稿、识别失败或首轮前挂断不创建空 Chat。`primary` 为可选 boolean，仅允许与 `newChat:true` 一起使用：省略或 false 创建普通 Chat，不改变主要指针；true 沿用普通 Query 的主要聊天创建与忙碌互斥规则，忙碌时语聊仍映射为 `chat_busy`。创建意图仅作用于首个受理 Query，后续轮次续用同一 Chat。未指定 chatId 且未请求 newChat 时保持默认行为：使用该 Agent 的主要聊天，没有则在首轮条件补建，期间主要聊天被他处设定返回 `chat_changed`。每个定稿作为一次普通 Query（planningMode:false，省略权限/编辑/model/references），成功保存且 complete 的最后正文去掉代码块、表格、链接地址等 Markdown 后才朗读（最多 800 字）。Chat 已有非本会话的活动 Run 返回 `chat_busy`；打断后的新定稿等旧 Run 终态后再提交，等待超时返回 `run_busy_timeout`。断线只停媒体并释放观察，不中断已受理 Run，重连不补录音/Query/播放。awaiting 只提示并等原界面 Submit，提示播放结束不开放新讲话；Run 完成后仍留有待处理项时返回 `awaiting_pending` 并结束本轮，不朗读。语音 Run 采用事实上的 voice transport，原用户的 HTTP/main WS 界面可按 subject 观察/控制，跨用户及 BTW/explain 拒绝；它不新增 Agent mode 或改变普通 HTTP/WS Run 的设备/transport 边界。HITL Submit 仍走既有授权和跨设备规则。
+收音开始固定 ownedRun 归属，定稿重查 Chat 与 Runtime 快照。原 Run 仍活动时复用 Steer，明确 `unmatched` 后最多保留一份定稿等原阻塞调用收尾，再检查无新活动 Run／awaiting 才提交 Query；结果未知报 `steer_outcome_unknown`，不自动重发或切换 Query。Run 在 Steer 回执前完成时先保留结果，待回执明确后决定播报或下一轮。媒体轮变化不会改写原有任务。
 
-错误码：
+Runtime 根据受信任 voice controlscope 在原 RunControl 入队锁内检查有效等待项，任何 question／approval／planning／form 均拒绝补充；普通 HTTP／主 WS Steer 保持原行为。该内部约束不接受线协议输入。远端 Proxy 尚无原子等待项检查合同，voice Steer 明确返回不支持，不转发或丢弃约束；远端普通控制保持原合同。
 
-- hello 前：`invalid_request`（首帧不是合法 hello，或 Agent、Chat、音色、音频格式不符）、`voice_unavailable`（模型或配置不可用），发送后关闭连接。
-- hello 后，error 携带 turn，结束对应轮次，连接保留：`asr_failed`、`recording_limit`、`transcript_limit`、`invalid_audio`、`audio_overflow`、`chat_busy`、`chat_changed`、`run_failed`、`run_busy_timeout`、`awaiting_pending`、`tts_failed`。无法观察 Run（`run_failed`）或旧 Run 收尾超时（`run_busy_timeout`）时随后关闭连接。阻塞 Query 返回后，订阅排空与 Run 释放共用 10 秒收尾期限；关闭订阅不取消 Run。ASR 错误只影响识别阶段，不停止已进入播放阶段的回答；TTS 失败允许客户端播完已经收到的尾部音频。
-- `turn_busy` 与 `invalid_request` 只拒绝该条消息，不影响服务端进行中的轮。被拒绝的 listen 返回服务端当前 turn；WebClient 遇到 `turn_busy` 结束媒体连接并提示重连，不能按自己预增的 turn 静默忽略。awaiting 提示语合成失败只以 `tts stop(reason=error)` 表示，不发 error，本轮继续等待。
+Run 观察按 ownedRun 消费；结束观察仍由原 Subscription.Close 完成 detach 和 MarkDone。断线只停媒体，服务关闭仍沿原规则清理受理的 Run。重连是新媒体会话，不续播、补录或跨连接重发。question 的每次收音绑定本连接 Run、awaitingId 和 Runtime 草稿中的下一道普通题；定稿绝不回退 Query。approval／planning／form 始终转原界面，语音不授予权限。语音 Run 的原用户仍可通过 HTTP／主 WS 观察和控制，跨用户与 BTW/explain 仍拒绝。
 
-时序示例：
+完整语音答题：text、select、multi-select、number、date、datetime 逐题收集。选项使用原 label；序号、有限中文数值和相对日期由 voice 的明确规则转换，共用 toolinteraction 单题校验，不调用额外模型。含糊组合、越界、非有限数值、无效日期继续问当前题；相对日期取 hello.timeZone 和 ASR 定稿时刻，不取服务器本地时区。password 从不成为语音题目，普通题全部答完后由原 QuestionDialog 补齐密码并整组提交。无密码时以稳定 submitId 调用原 Runtime Submit 一次，不增加最终口头确认；未知结果查当前等待项并交原界面，不自动重发。
+
+`GET /api/chat` 的当前 question awaiting 增加只读 `questionDraft:{revision,answers:[{id,answer}|{id,answers}]}`。Runtime 在原等待锁内维护、校验身份和题目；草稿不进入 JSONL、模型上下文、公开 Run 快照或事件历史。断线保留，提交、取消、超时或进程重启清除。`chat.awaiting{chatId,agentKey,runId,awaitingId,mode:"question",questionDraftChanged:true,updatedAt}` 只通知刷新，不发送答案。原表单按 ID 预填，拒绝旧 revision，保留用户已经编辑的字段，密码不预填。voice 的最终 Submit 在仲裁锁内再次要求完整普通题草稿，题目换代后不能提交密码／审批／表单；远端 Proxy 无此原子约束时明确拒绝语音 Submit，普通 UI Submit 不变。
+
+协议格式、错误 turn／请求 ID 及无法确认普通输入事实返回 invalid_request 并关闭媒体。UI 抢先回答使 question listen 绑定失效时返回 input_changed 和 awaiting.resolved，不启动 ASR、不取消 Run；已开始的旧问题收音／提示结束，晚到 ASR 丢弃。asr_failed、recording_limit、transcript_limit、invalid_audio、audio_overflow、chat_busy、chat_changed、run_failed、input_changed、steer_rejected、steer_outcome_unknown、question_failed、awaiting_pending、tts_failed 结束对应轮次；Run 观察失败或实际 Run 释放超时随后关闭连接；仅等待定稿超时则丢弃该定稿并结束当前媒体轮。明确 Interrupt 失败可以再次显式停止任务；媒体确认不改变 Runtime 准入。提问／提示合成失败仅发送 stop(reason:error)，可手动回答当前普通题或使用原界面；最终 TTS 失败允许已收到的尾音播放。
 
 ```text
-→ {"type":"hello","version":1,"agentKey":"zenmi","audio":{"input":{"codec":"pcm_s16le","sampleRate":16000,"channels":1,"frameMs":20},"output":{"codec":"pcm_s16le","sampleRate":16000}}}
-← {"type":"hello","version":1,"sessionId":"vs1","agentKey":"zenmi","chatId":"c1","audio":{"output":{"codec":"pcm_s16le","sampleRate":16000,"channels":1,"frameMs":20}}}
-→ {"type":"listen","state":"start","mode":"auto"}
+→ {"type":"hello","version":2,"agentKey":"zenmi","timeZone":"Asia/Shanghai","audio":{"input":{"codec":"pcm_s16le","sampleRate":16000,"channels":1,"frameMs":20},"output":{"codec":"pcm_s16le","sampleRate":16000}}}
+← {"type":"hello","version":2,"sessionId":"vs1","agentKey":"zenmi","chatId":"c1","audio":{"output":{"codec":"pcm_s16le","sampleRate":16000,"channels":1,"frameMs":20}}}
+→ {"type":"listen","state":"start","requestId":"voice:vs1:1","turn":1,"intent":"conversation"}
+← {"type":"listen.ready","requestId":"voice:vs1:1","turn":1}
 → [PCM 20ms] ...
-← {"type":"stt","turn":1,"text":"今天北京","final":false}
 ← {"type":"stt","turn":1,"text":"今天北京天气怎么样？","final":true}
-← {"type":"run","turn":1,"state":"start","runId":"r1","chatId":"c1"}
-← {"type":"run","turn":1,"state":"end","runId":"r1","chatId":"c1","finishReason":"complete"}
-← {"type":"tts","turn":1,"state":"start","text":"北京今天晴，最高十八度。"}
+← {"type":"run","state":"start","runId":"r1","chatId":"c1"}
+← {"type":"run","state":"end","runId":"r1","chatId":"c1","finishReason":"complete"}
+← {"type":"tts","turn":1,"speechId":"s1","purpose":"final","state":"start","text":"北京今天晴。"}
 ← [PCM 20ms] ...
-← {"type":"tts","turn":1,"state":"stop","reason":"done"}
-→ {"type":"listen","state":"start","mode":"auto"}
+← {"type":"tts","turn":1,"speechId":"s1","purpose":"final","state":"stop","reason":"done"}
 ```
 
-当前后端隔离矩阵已通过，WebClient 与 Desktop 宿主已切换；zenmind-gateway 路由、设备与真实部署/性能验收仍未完成，不能作为整阶段已交付依据。剩余工作见 [实时语音方案](../plans/realtime-voice.md)。
+计时日志（不增加 voice 线协议）：`category:voice.timing` 使用 `clock:server_session_monotonic` 与同会话 `atMs`。asrFinal 在 ASR 完成返回时记录，runStart 在已登记 Run 的回调处记录，runEnd 使用成功落盘的内部单调时间，runReleased 区分后续收尾。ttsFirstAudio 是供应商首个完整 PCM 采样可用，audioReleased 是当前媒体首帧成功写出，二者均不代表浏览器实际发声；notice 与 final 由 purpose 区分。记录供应商 taskId、连接复用和启动重试，不含正文／录音／凭据。ttsFinished 保留已被替换媒体的 failed／cancelled 结果，runReleaseFailed 区分订阅与 Chat 释放超时。steerAccepted 只表示受理，steerConsumedObserved 表示订阅观察到原 request.steer，不能反推工具执行时刻。WebClient 以独立的 client_performance 时钟记录 manualStop、playStart 与本地打断；speechEnd 由标注采样输入，不以 ASR 收到时间替代。跨端时钟不相减。
+
+实时语音用量：ASR 只取 Paraformer `payload.usage.duration`（秒），TTS 只取 CosyVoice `payload.usage.characters`（累计计费字符）；空／缺失 usage 是未知，绝不由文本长度或 PCM 推算。每个实际供应商 task 独立生成 usageId，重试另记；同 task 数量累计取最大值，取消／失败保留已经收到的数量。任务发送前冻结当前 registry 价格和既有 billing 币种回退；会话中的模型身份变化要求重新连接。
+
+每 Chat JSONL 的 `event.type=voice.usage` 保存 `usage{usageId,provider,taskId,model,operation,runId?,pricing,known,characters,billedAudioSeconds,status}`；status 为 running／complete／failed／cancelled。该事实不进入正文、模型消息、ensureRun 或原 SQL 用量列。ASR 先按真实 Chat 保存；新 Chat 等实际 OnRunStarted 后绑定，已受理的 Steer 绑定原 Run；未形成 Chat 的消耗仅留 metadata 运行日志。
+
+Chat 详情的 `usage.chat`／`usage.lastRun`、逐 Run 的 `usage`、归档详情／归档列表及恢复摘要先选择原模型／工具基值，再合并一次语音费用。增加 `voice{tasks,unknownTasks,pendingTasks,unpricedTasks,characters,billedAudioSeconds,estimatedCost?}`；总金额仅包括已知且有价格的部分，未知或未定价任务不能视为免费。导航列表原本省略 usage 的合同保持不变。原始 JSONL 导出保留语音事实，归档和恢复不把合并金额写回 SQL。币种冲突／损坏事实等投影错误明确报错，不返回假总额。
+
+有效事实落盘后经原通知链发送 `chat.updated{chatId,agentKey,updatedAt,usageChanged:true}`；updatedAt 沿用 Chat 已持久化时间，不改变最近回复或 Run 时间。WebClient 重读当前 Chat 的权威费用投影，只更新费用，保留当前正文与 Run 状态；后续 Runtime 基值快照保留已读到的语音费用，未知用量／价格和刷新失败明确提示。
+
+conversation 在同一变更锁内协调语音写入与归档／删除。每 Chat 的媒体计量在途计数覆盖供应商任务及 Run 收尾到 TTS 启动的间隙，未知终态可以正常结束；写入失败保留阻断并记录 metadata。HTTP／主 WS 删除在途 Chat 返回 409，归档返回该 Chat 失败结果；voice `usage_failed` 报告不完整记账并结束当前媒体工作，已受理 Run 不因此取消。进程内计数不是持久账本，进程崩溃前未收到的供应商数量不保证补齐。
+
+v2 配套软件正在实施；网关路径、供应商、真人、Desktop 与硬件验收不能由隔离测试代替。当前执行入口是 workspace `plan/2026-11-06-realtime-voice-refactor/`；历史方案见 [实时语音方案](../plans/realtime-voice.md)。
 
 ### KBASE
 

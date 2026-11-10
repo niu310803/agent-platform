@@ -24,11 +24,19 @@ type ChatErrorInfo struct {
 }
 
 type Awaiting struct {
-	AwaitingID string `json:"awaitingId"`
-	RunID      string `json:"runId"`
-	Mode       string `json:"mode"`
-	Status     string `json:"status"`
-	CreatedAt  int64  `json:"createdAt"`
+	QuestionDraft *QuestionDraft `json:"questionDraft,omitempty"`
+	AwaitingID    string         `json:"awaitingId"`
+	RunID         string         `json:"runId"`
+	Mode          string         `json:"mode"`
+	Status        string         `json:"status"`
+	CreatedAt     int64          `json:"createdAt"`
+}
+
+// QuestionDraft is a temporary UI projection, never a persisted event or
+// model message. Only ordinary validated question answers may appear here.
+type QuestionDraft struct {
+	Revision int64            `json:"revision"`
+	Answers  []map[string]any `json:"answers"`
 }
 
 type ToolDefinition struct {

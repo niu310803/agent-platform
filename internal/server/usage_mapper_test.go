@@ -3,8 +3,8 @@ package server
 import (
 	"testing"
 
+	"agent-platform/internal/api"
 	"agent-platform/internal/chat"
-	"agent-platform/internal/stream"
 )
 
 func TestUsageCacheTokensKeepsConsistentDetails(t *testing.T) {
@@ -86,46 +86,8 @@ func TestMapUsageDataFromPayloadComputesTimingFromInternalTotals(t *testing.T) {
 	}
 }
 
-func TestLatestChatUsageFromEventsReadsHistoricalUsageSnapshot(t *testing.T) {
-	usage := latestChatUsageFromEvents([]stream.EventData{
-		{
-			Type: "usage.snapshot",
-			Payload: map[string]any{
-				"usage": map[string]any{
-					"current": map[string]any{
-						"promptTokens":           100,
-						"completionTokens":       50,
-						"totalTokens":            150,
-						"llmChatCompletionCount": 1,
-					},
-					"chat": map[string]any{
-						"promptTokens":     6574,
-						"completionTokens": 104,
-						"totalTokens":      6678,
-						"completionTokensDetails": map[string]any{
-							"reasoningTokens": 70,
-						},
-						"llmChatCompletionCount": 1,
-						"toolCallCount":          3,
-					},
-				},
-			},
-		},
-	})
-	if usage == nil || usage.PromptTokens != 6574 || usage.CompletionTokens != 104 || usage.TotalTokens != 6678 {
-		t.Fatalf("expected chat cumulative usage, got %#v", usage)
-	}
-	if usage.CompletionTokensDetails == nil || usage.CompletionTokensDetails.ReasoningTokens != 70 ||
-		usage.LlmChatCompletionCount != 1 {
-		t.Fatalf("expected detailed chat cumulative usage, got %#v", usage)
-	}
-	if usage.ToolCallCount != 3 {
-		t.Fatalf("expected chat tool call count, got %#v", usage)
-	}
-}
-
 func TestChatUsageBreakdownPrefersLatestRunAndHistoricalChatUsage(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		&chat.UsageData{PromptTokens: 111, CompletionTokens: 22, TotalTokens: 133, LlmChatCompletionCount: 2, ToolCallCount: 4},
 		[]chat.RunSummary{
 			{RunID: "run-2", Usage: chat.UsageData{ModelKey: "mock-model", PromptTokens: 11, CompletionTokens: 5, TotalTokens: 16, ReasoningTokens: 3, EstimatedCostCurrency: "CNY", EstimatedCostTotal: 0.12, LlmChatCompletionCount: 1, ToolCallCount: 2}},
@@ -159,7 +121,7 @@ func TestChatUsageBreakdownPrefersLatestRunAndHistoricalChatUsage(t *testing.T) 
 }
 
 func TestChatUsageBreakdownUsesSummaryChatUsageWithoutHistoricalRunFallback(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		&chat.UsageData{PromptTokens: 30, CompletionTokens: 7, TotalTokens: 37, LlmChatCompletionCount: 2},
 		nil,
 		chat.ReplayUsage{},
@@ -176,7 +138,7 @@ func TestChatUsageBreakdownUsesSummaryChatUsageWithoutHistoricalRunFallback(t *t
 }
 
 func TestChatUsageBreakdownUsesReplayWhenRunHasNoSummary(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		nil,
 		nil,
 		chat.ReplayUsage{
@@ -200,7 +162,7 @@ func TestChatUsageBreakdownUsesReplayWhenRunHasNoSummary(t *testing.T) {
 }
 
 func TestChatUsageBreakdownPrefersCompletedRunSummaryOverReplayForSameRun(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		nil,
 		[]chat.RunSummary{
 			{
@@ -256,7 +218,7 @@ func TestMapChatContextWindowIncludesWindowSizes(t *testing.T) {
 }
 
 func TestChatUsageBreakdownUsesReplayChatWhenSummaryLags(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		&chat.UsageData{PromptTokens: 7, CompletionTokens: 3, TotalTokens: 10, LlmChatCompletionCount: 1},
 		nil,
 		chat.ReplayUsage{
@@ -276,7 +238,7 @@ func TestChatUsageBreakdownUsesReplayChatWhenSummaryLags(t *testing.T) {
 }
 
 func TestChatUsageBreakdownSupplementsCostFromReplayWhenSummaryLacksCost(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		&chat.UsageData{
 			PromptTokens:           100,
 			CompletionTokens:       50,
@@ -319,7 +281,7 @@ func TestChatUsageBreakdownSupplementsCostFromReplayWhenSummaryLacksCost(t *test
 }
 
 func TestChatUsageBreakdownPrefersRunSummaryCostOverReplay(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		nil,
 		[]chat.RunSummary{
 			{
@@ -352,7 +314,7 @@ func TestChatUsageBreakdownPrefersRunSummaryCostOverReplay(t *testing.T) {
 }
 
 func TestChatUsageBreakdownSupplementsRunCostFromReplayWhenRunSummaryLacksCost(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		nil,
 		[]chat.RunSummary{
 			{
@@ -397,7 +359,7 @@ func TestChatUsageBreakdownSupplementsRunCostFromReplayWhenRunSummaryLacksCost(t
 }
 
 func TestChatUsageBreakdownReplayOnlyAwaitingRunReturnsCost(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		nil,
 		nil,
 		chat.ReplayUsage{
@@ -426,7 +388,7 @@ func TestChatUsageBreakdownReplayOnlyAwaitingRunReturnsCost(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestChatUsageBreakdownDoesNotEstimateLastRunWithoutPersistedCost(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		nil,
 		[]chat.RunSummary{
 			{
@@ -455,7 +417,7 @@ func TestChatUsageBreakdownDoesNotEstimateLastRunWithoutPersistedCost(t *testing
 }
 
 func TestChatUsageBreakdownDoesNotEstimateChatWhenTokenSameAsLastRun(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		&chat.UsageData{PromptTokens: 1_000_000, CompletionTokens: 1_000_000, TotalTokens: 2_000_000, LlmChatCompletionCount: 1},
 		[]chat.RunSummary{
 			{
@@ -488,7 +450,7 @@ func TestChatUsageBreakdownDoesNotEstimateChatWhenTokenSameAsLastRun(t *testing.
 }
 
 func TestChatUsageBreakdownDoesNotEstimateMultiRunChat(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		&chat.UsageData{PromptTokens: 200, CompletionTokens: 100, TotalTokens: 300, LlmChatCompletionCount: 2},
 		[]chat.RunSummary{
 			{
@@ -517,7 +479,7 @@ func TestChatUsageBreakdownDoesNotEstimateMultiRunChat(t *testing.T) {
 }
 
 func TestChatUsageBreakdownSkipsFallbackWhenModelNotFound(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		nil,
 		[]chat.RunSummary{
 			{
@@ -547,7 +509,7 @@ func TestChatUsageBreakdownSkipsFallbackWhenModelNotFound(t *testing.T) {
 }
 
 func TestChatUsageBreakdownSkipsFallbackWhenPricingMissing(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		nil,
 		[]chat.RunSummary{
 			{
@@ -577,7 +539,7 @@ func TestChatUsageBreakdownSkipsFallbackWhenPricingMissing(t *testing.T) {
 }
 
 func TestChatUsageBreakdownDoesNotFallbackToCompletedRunModel(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		&chat.UsageData{PromptTokens: 1_000_000, CompletionTokens: 1_000_000, TotalTokens: 2_000_000, LlmChatCompletionCount: 1},
 		[]chat.RunSummary{
 			{
@@ -613,7 +575,7 @@ func TestChatUsageBreakdownDoesNotFallbackToCompletedRunModel(t *testing.T) {
 }
 
 func TestChatUsageBreakdownDoesNotFallbackToContextWindowForReplayOnlyModel(t *testing.T) {
-	breakdown := chatUsageBreakdown(
+	breakdown := mustChatUsageBreakdown(t,
 		nil,
 		nil,
 		chat.ReplayUsage{
@@ -635,4 +597,13 @@ func TestChatUsageBreakdownDoesNotFallbackToContextWindowForReplayOnlyModel(t *t
 	if breakdown.Chat.EstimatedCost != nil {
 		t.Fatalf("did not expect chat context-window read-time fallback cost, got %#v", breakdown.Chat.EstimatedCost)
 	}
+}
+
+func mustChatUsageBreakdown(t *testing.T, summary *chat.UsageData, runs []chat.RunSummary, replay chat.ReplayUsage) *api.ChatUsageBreakdown {
+	t.Helper()
+	result, err := chatUsageBreakdown(summary, runs, replay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
 }

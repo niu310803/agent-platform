@@ -3,17 +3,46 @@ package toolinteraction
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
+	"time"
 
 	"agent-platform/internal/contracts"
 )
+
+// NormalizeQuestionSubmitItem is the single item validator shared by complete
+// submissions and the Runtime's temporary question draft. It does not relax
+// the complete submission's ordered, all-questions contract.
+func NormalizeQuestionSubmitItem(definition, answer map[string]any) (any, error) {
+	raw, err := normalizeQuestionSubmitValue(definition, answer)
+	if err != nil {
+		return nil, err
+	}
+	return normalizeQuestionAnswer(definition, raw)
+}
 
 func normalizeQuestionAnswer(definition map[string]any, rawAnswer any) (any, error) {
 	questionType := strings.ToLower(contracts.AnyStringNode(definition["type"]))
 	switch questionType {
 	case "number":
 		switch value := rawAnswer.(type) {
-		case int, int32, int64, float32, float64, json.Number:
+		case int, int32, int64:
+			return value, nil
+		case float32:
+			if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+				return nil, fmt.Errorf("answer must be a finite number")
+			}
+			return value, nil
+		case float64:
+			if math.IsNaN(value) || math.IsInf(value, 0) {
+				return nil, fmt.Errorf("answer must be a finite number")
+			}
+			return value, nil
+		case json.Number:
+			parsed, err := value.Float64()
+			if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+				return nil, fmt.Errorf("answer must be a finite number")
+			}
 			return value, nil
 		default:
 			return nil, fmt.Errorf("answer must be a number")
@@ -22,6 +51,22 @@ func normalizeQuestionAnswer(definition map[string]any, rawAnswer any) (any, err
 		text := contracts.AnyStringNode(rawAnswer)
 		if text == "" {
 			return nil, fmt.Errorf("answer must be a non-empty string")
+		}
+		if questionType == "date" || questionType == "datetime" {
+			layouts := []string{"2006-01-02"}
+			if questionType == "datetime" {
+				layouts = []string{"2006-01-02 15:04:05", "2006-01-02T15:04", "2006-01-02T15:04:05"}
+			}
+			valid := false
+			for _, layout := range layouts {
+				if date, err := time.Parse(layout, text); err == nil && date.Year() > 0 && date.Format(layout) == text {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				return nil, fmt.Errorf("answer must be a valid %s", questionType)
+			}
 		}
 		return text, nil
 	case "multi-select":
@@ -64,7 +109,7 @@ func normalizeQuestionAnswer(definition map[string]any, rawAnswer any) (any, err
 		}
 		return text, nil
 	default:
-		return rawAnswer, nil
+		return nil, fmt.Errorf("unsupported question type")
 	}
 }
 

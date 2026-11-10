@@ -95,6 +95,8 @@ Platform 重启统一取消所有未完成 Run，包括 question、planning、ap
 - `param.decision: "dismiss"` 与 `params: []` 都归一化为 `awaiting.answer.error.code: "user_dismissed"`。
 - `request.submit` 原样回显 `param` 或 `params`。
 - `mode=question` 会按对应问题的类型校验答案：多选题只能提交非空 `answers` 数组，其他题型只能提交 `answer`；数量必须匹配，且沿用题型的值与候选项约束。提交无效 question 答案时接口返回 `data.accepted:false`、`data.status:"invalid"`，不会写入 answer 事件或解除等待项，客户端可修正后重新提交。
+- 实时语音 v2 的普通 question 支持 text、select、multi-select、number、date、datetime。Runtime 内部 `UpdateQuestionDraft` 复用单题校验，在原等待项锁内检查主体、Run／awaiting／question 身份并递增 revision；`GET /api/chat` 当前 awaiting 可带 `questionDraft:{revision,answers}`，只供原界面预填，不写 JSONL 或模型上下文。语音逐题收齐后调用原 Submit 一次；最终仲裁再检查全部普通题、同一草稿和仍有效的等待项，未知提交结果不重发。原 UI 抢先提交、超时、取消与语音提交共享同一仲裁。
+- password 永不语音收集，普通答案保留至原界面补密码并整组提交；QuestionDialog 不覆盖用户已编辑字段。approval、planning 和 form 均转原界面，说“同意／执行”不能批准操作，也不能绕过等待项开启新的 Query。草稿不跨进程恢复，语音断线不清除同进程仍有效的草稿。
 - 子智能体 HITL 的 `request.submit` 与 `awaiting.answer` 会继续回显 public `awaitingId`，并携带 `taskId`，用于前端归并到子任务面板；后端内部唤醒的仍是 raw awaiting。
 - run owner 统一校验根 `agentKey`；成员事件 key 不能用于控制总控 Run。
 - `approval.options[]` 与 `planning.options[]` 的内置动作只下发 `decision` code，按钮文案由 webclient 按当前语言本地化。两类选项协议均不含 `description`，Approval 选项说明由 webclient 按 `decision` 本地生成；Platform 在原生、代理和回放的统一流事件边界移除 `approvals[].options[].description` 与 `planning.options[].description`，不改写历史文件。审批项级 `approval.description` 仍用于审批标题；`question.options[].description` 仍用于答案提示，`question.options[].label` 仍是用户可见答案文本与答案匹配值，`form.title/form` 仍是业务或工具内容。

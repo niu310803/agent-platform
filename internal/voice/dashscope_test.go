@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"agent-platform/internal/chat"
 	"agent-platform/internal/models"
 	"github.com/gorilla/websocket"
 )
@@ -112,7 +113,7 @@ func TestVoiceConnectionFailureDiagnostic(t *testing.T) {
 		}))
 		client := testASR(t, models.ProviderDefinition{BaseURL: server.URL, APIKey: "test-secret"})
 		client.socket.model.Key = "asr-test"
-		_, err := client.Recognize(ctx, make(chan []byte), "manual", nil)
+		_, _, err := client.Recognize(ctx, make(chan []byte), nil, nil)
 		cancel()
 		server.Close()
 		if cancelled {
@@ -206,7 +207,7 @@ func TestASRManualTailRevisionsAndConnectionReuse(t *testing.T) {
 		input <- []byte{8, 9}
 		close(input)
 		var partials []string
-		text, err := c.Recognize(context.Background(), input, "manual", func(text string, _ bool) { partials = append(partials, text) })
+		text, _, err := c.Recognize(context.Background(), input, func(text string, _ bool) { partials = append(partials, text) }, nil)
 		if err != nil || text != "第一句。第二句。" || len(partials) != 3 {
 			t.Fatalf("%q %v %v", text, err, partials)
 		}
@@ -231,7 +232,7 @@ func TestASRAutoFinishesAndCollectsInflightTail(t *testing.T) {
 		event(t, c, id, "result-generated", map[string]any{"begin_time": 200, "text": "尾句。", "sentence_end": true})
 		event(t, c, id, "task-finished", nil)
 	})
-	text, err := testASR(t, p).Recognize(context.Background(), input, "auto", nil)
+	text, _, err := testASR(t, p).Recognize(context.Background(), input, nil, nil)
 	if err != nil || text != "一句。尾句。" {
 		t.Fatalf("%q %v", text, err)
 	}
@@ -255,7 +256,7 @@ func TestASREmptyAndMalformedPCM(t *testing.T) {
 				input <- []byte{1}
 			}
 			close(input)
-			text, err := testASR(t, p).Recognize(context.Background(), input, "manual", nil)
+			text, _, err := testASR(t, p).Recognize(context.Background(), input, nil, nil)
 			if text != "" || (err != nil) != invalid {
 				t.Fatalf("%q %v", text, err)
 			}
@@ -284,15 +285,15 @@ func TestASRWaitsThroughSilenceUntilCallerStops(t *testing.T) {
 	input := make(chan []byte)
 	timer := time.AfterFunc(11*time.Second, func() { close(input) })
 	defer timer.Stop()
-	text, err := testASR(t, p).Recognize(ctx, input, "manual", nil)
+	text, _, err := testASR(t, p).Recognize(ctx, input, nil, nil)
 	if err != nil || text != "稍后才说话。" {
 		t.Fatalf("silence ended a valid task: %q %v", text, err)
 	}
 }
 
 func TestASRSilentAudioHeartbeatThenSpeech(t *testing.T) {
-	for _, mode := range []string{"auto", "manual"} {
-		t.Run(mode, func(t *testing.T) {
+	for _, earlyStop := range []bool{false, true} {
+		t.Run(map[bool]string{false: "automatic", true: "early stop"}[earlyStop], func(t *testing.T) {
 			p := fakeVoice(t, func(c *websocket.Conn) {
 				start := readCommand(t, c, "run-task")
 				id := start.Header.ID
@@ -317,15 +318,15 @@ func TestASRSilentAudioHeartbeatThenSpeech(t *testing.T) {
 			input := make(chan []byte, 1)
 			input <- make([]byte, 640)
 			partials := 0
-			text, err := testASR(t, p).Recognize(context.Background(), input, mode, func(text string, stopping bool) {
+			text, _, err := testASR(t, p).Recognize(context.Background(), input, func(text string, stopping bool) {
 				partials++
-				if text != "稍后才说话。" || stopping != (mode == "auto") {
+				if text != "稍后才说话。" || !stopping {
 					t.Error("heartbeat leaked into recognition or changed stop behavior", text, stopping)
 				}
-				if mode == "manual" && partials == 1 {
+				if earlyStop && partials == 1 {
 					close(input)
 				}
-			})
+			}, nil)
 			if err != nil || text != "稍后才说话。" || partials != 1 {
 				t.Fatalf("silence prevented subsequent speech: text=%q partials=%d err=%v", text, partials, err)
 			}
@@ -345,7 +346,7 @@ func TestASRStillBoundsFinalizationWithoutProviderEvents(t *testing.T) {
 	defer cancel()
 	input := make(chan []byte)
 	close(input)
-	_, err := testASR(t, p).Recognize(ctx, input, "manual", nil)
+	_, _, err := testASR(t, p).Recognize(ctx, input, nil, nil)
 	if err == nil || err.Error() != "voice recognition finish timeout" {
 		t.Fatalf("unbounded finalization: %v", err)
 	}
@@ -380,7 +381,7 @@ func TestTTSStreamingFormatsAndReuse(t *testing.T) {
 	for _, rate := range []int{16000, 24000} {
 		var got bytes.Buffer
 		calls := 0
-		err := c.Synthesize(context.Background(), "完整正文", "configured-voice", rate, func(p []byte) error { calls++; _, err := got.Write(p); return err })
+		_, err := c.Synthesize(context.Background(), "完整正文", "configured-voice", rate, func(p []byte) error { calls++; _, err := got.Write(p); return err })
 		if err != nil || got.Len() != 6 || calls != 2 {
 			t.Fatalf("%d %d %v", got.Len(), calls, err)
 		}
@@ -447,7 +448,7 @@ func TestTTSSendsEachSegmentInOneTask(t *testing.T) {
 		_ = c.WriteMessage(websocket.BinaryMessage, []byte{1, 2})
 		event(t, c, id, "task-finished", nil)
 	})
-	if err := testTTS(t, p).Synthesize(context.Background(), text, "voice", 24000, func([]byte) error { return nil }); err != nil {
+	if _, err := testTTS(t, p).Synthesize(context.Background(), text, "voice", 24000, func([]byte) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -483,7 +484,7 @@ func TestTTSFailureCancellationAndBackpressure(t *testing.T) {
 				}
 			})
 			c := testTTS(t, p)
-			err := c.Synthesize(ctx, "正文", "voice", 16000, func([]byte) error {
+			_, err := c.Synthesize(ctx, "正文", "voice", 16000, func([]byte) error {
 				if mode == "callback" {
 					return errors.New("consumer stopped")
 				}
@@ -521,7 +522,7 @@ func TestProviderFailureAndStartupTrace(t *testing.T) {
 	input := make(chan []byte, 1)
 	done := make(chan error, 1)
 	go func() {
-		_, err := testASR(t, p).Recognize(withTaskTrace(context.Background(), trace), input, "manual", nil)
+		_, _, err := testASR(t, p).Recognize(withTaskTrace(context.Background(), trace), input, nil, nil)
 		done <- err
 	}()
 	for trace.phase() != "awaiting_task_started" {
@@ -553,13 +554,13 @@ func TestASRStartupOverflowAndCancellation(t *testing.T) {
 				}
 				_, _, _ = c.ReadMessage()
 			})
-			input := make(chan []byte, maxStartupPCM/640+1)
+			input := make(chan []byte, maxStartupAudioBytes/640+1)
 			if overflow {
 				for i := 0; i < cap(input); i++ {
 					input <- make([]byte, 640)
 				}
 			}
-			_, err := testASR(t, p).Recognize(ctx, input, "manual", nil)
+			_, _, err := testASR(t, p).Recognize(ctx, input, nil, nil)
 			if err == nil {
 				t.Fatal("missing failure")
 			}
@@ -588,7 +589,7 @@ func TestVoiceEndpointAndAuthRejection(t *testing.T) {
 	c := testASR(t, p)
 	input := make(chan []byte)
 	close(input)
-	_, err = c.Recognize(context.Background(), input, "manual", nil)
+	_, _, err = c.Recognize(context.Background(), input, nil, nil)
 	if err == nil || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("credential leak %v", err)
 	}
@@ -628,11 +629,21 @@ func TestReusedSocketClosedWhileIdleReconnectsOnce(t *testing.T) {
 		input := make(chan []byte, 1)
 		input <- make([]byte, 640)
 		close(input)
-		if text, err := a.Recognize(context.Background(), input, "manual", nil); err != nil || text != "一句。" {
+		text, asrUsages, err := a.Recognize(context.Background(), input, nil, nil)
+		if err != nil || text != "一句。" {
 			t.Fatalf("ASR turn %d: %q %v", i, text, err)
 		}
-		if err := s.Synthesize(context.Background(), "正文", "voice", 16000, func([]byte) error { return nil }); err != nil {
+		ttsUsages, err := s.Synthesize(context.Background(), "正文", "voice", 16000, func([]byte) error { return nil })
+		if err != nil {
 			t.Fatalf("TTS turn %d: %v", i, err)
+		}
+		for _, usages := range [][]chat.VoiceUsage{asrUsages, ttsUsages} {
+			if len(usages) != i+1 || usages[len(usages)-1].Status != "complete" {
+				t.Fatalf("lost task attempts: %+v", usages)
+			}
+			if i == 1 && (usages[0].TaskID == usages[1].TaskID || usages[0].Status != "failed") {
+				t.Fatalf("retry reused billing identity: %+v", usages)
+			}
 		}
 	}
 	if asrConns.Load() != 2 || ttsConns.Load() != 2 {
@@ -655,10 +666,10 @@ func TestReusedSocketProviderFailureIsNotRetried(t *testing.T) {
 		_, _, _ = c.ReadMessage()
 	})
 	c := testTTS(t, p)
-	if err := c.Synthesize(context.Background(), "正文", "voice", 16000, func([]byte) error { return nil }); err != nil {
+	if _, err := c.Synthesize(context.Background(), "正文", "voice", 16000, func([]byte) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Synthesize(context.Background(), "正文", "voice", 16000, func([]byte) error { return nil }); err == nil {
+	if _, err := c.Synthesize(context.Background(), "正文", "voice", 16000, func([]byte) error { return nil }); err == nil {
 		t.Fatal("provider task failure was hidden")
 	}
 	if connections.Load() != 1 {
@@ -685,7 +696,7 @@ func TestReusedSilentSocketRetriesWithinStartupBuffer(t *testing.T) {
 	c := testTTS(t, p)
 	for i := 0; i < 2; i++ {
 		begin := time.Now()
-		if err := c.Synthesize(context.Background(), "正文", "voice", 16000, func([]byte) error { return nil }); err != nil {
+		if _, err := c.Synthesize(context.Background(), "正文", "voice", 16000, func([]byte) error { return nil }); err != nil {
 			t.Fatalf("turn %d: %v", i, err)
 		}
 		// Waiting out the fresh-socket timeout would overflow the startup buffer.

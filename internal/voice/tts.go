@@ -8,8 +8,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"agent-platform/internal/chat"
 	"agent-platform/internal/models"
-	"github.com/google/uuid"
 )
 
 // Playback is paced in real time, so the text cap keeps ordinary speech rates
@@ -86,10 +86,10 @@ func (c *TTSClient) Close() { c.socket.close() }
 // Synthesize sends the complete committed text in one task, segment by
 // segment. The callback consumes PCM synchronously, providing backpressure
 // without buffering the whole response.
-func (c *TTSClient) Synthesize(ctx context.Context, text, voice string, sampleRate int, audio func([]byte) error) (err error) {
+func (c *TTSClient) Synthesize(ctx context.Context, text, voice string, sampleRate int, audio func([]byte) error) (usages []chat.VoiceUsage, err error) {
 	segments := speechSegments(text)
 	if len(segments) == 0 || utf8.RuneCountInString(text) > maxSynthesisRunes || voice == "" || audio == nil || (sampleRate != 16000 && sampleRate != 24000) {
-		return errors.New("invalid voice synthesis input")
+		return usages, errors.New("invalid voice synthesis input")
 	}
 	ctx, cancel := context.WithTimeout(ctx, maxSynthesisAudio+time.Minute)
 	defer cancel()
@@ -97,46 +97,48 @@ func (c *TTSClient) Synthesize(ctx context.Context, text, voice string, sampleRa
 		if ctx.Err() != nil {
 			err = ctx.Err()
 		}
+		finishProviderUsage(usages, err)
 	}()
-	id := uuid.NewString()
-	conn, end, err := c.socket.start(ctx, id, map[string]any{"task_group": "audio", "task": "tts", "function": "SpeechSynthesizer", "model": c.socket.model.ModelID, "input": map[string]any{}, "parameters": map[string]any{"text_type": "PlainText", "voice": voice, "format": "pcm", "sample_rate": sampleRate}})
+	conn, end, usages, err := c.socket.start(ctx, map[string]any{"task_group": "audio", "task": "tts", "function": "SpeechSynthesizer", "model": c.socket.model.ModelID, "input": map[string]any{}, "parameters": map[string]any{"text_type": "PlainText", "voice": voice, "format": "pcm", "sample_rate": sampleRate}})
 	if err != nil {
-		return err
+		return usages, err
 	}
+	usage := &usages[len(usages)-1]
+	id := usage.TaskID
 	success := false
 	defer func() { end(success) }()
 	for _, segment := range segments {
 		if err = dashCommand(conn, id, "continue-task", map[string]any{"input": map[string]any{"text": segment}}); err != nil {
-			return err
+			return usages, err
 		}
 	}
 	if err = dashCommand(conn, id, "finish-task", map[string]any{"input": map[string]any{}}); err != nil {
-		return err
+		return usages, err
 	}
 	bytes := 0
 	for {
-		pcm, event, readErr := c.socket.read(conn, id, time.Now().Add(finishTimeout))
+		pcm, event, readErr := c.socket.read(conn, id, time.Now().Add(finishTimeout), usage)
 		if readErr != nil {
-			return readErr
+			return usages, readErr
 		}
 		if len(pcm) > 0 {
 			if err := ctx.Err(); err != nil {
-				return err
+				return usages, err
 			}
 			bytes += len(pcm)
 			if bytes > sampleRate*2*int(maxSynthesisAudio/time.Second) {
-				return errors.New("voice synthesis exceeds duration limit")
+				return usages, errors.New("voice synthesis exceeds duration limit")
 			}
 			if err = audio(pcm); err != nil {
-				return err
+				return usages, err
 			}
 		}
 		if event != nil && event.Header.Event == "task-finished" {
 			if bytes == 0 || bytes%2 != 0 {
-				return errors.New("voice provider returned empty or unaligned PCM")
+				return usages, errors.New("voice provider returned empty or unaligned PCM")
 			}
 			success = true
-			return nil
+			return usages, nil
 		}
 	}
 }

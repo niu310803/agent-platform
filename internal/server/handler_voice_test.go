@@ -24,6 +24,7 @@ import (
 	"agent-platform/internal/chat"
 	"agent-platform/internal/config"
 	"agent-platform/internal/contracts"
+	"agent-platform/internal/runtime/controlscope"
 	"agent-platform/internal/runtime/runstate"
 	rt "agent-platform/internal/runtime/types"
 	"agent-platform/internal/voice"
@@ -38,7 +39,8 @@ type voiceTestCommand struct {
 	Payload struct {
 		Task       string `json:"task"`
 		Parameters struct {
-			SampleRate int `json:"sample_rate"`
+			SampleRate int    `json:"sample_rate"`
+			Format     string `json:"format"`
 		} `json:"parameters"`
 		Input struct {
 			Text string `json:"text"`
@@ -47,21 +49,24 @@ type voiceTestCommand struct {
 }
 
 type voiceTestProvider struct {
-	texts      chan string
-	asr        atomic.Int32
-	tts        atomic.Int32
-	pcmBytes   atomic.Int32
-	transcript atomic.Value
-	autoFinal  atomic.Bool
-	partial    atomic.Bool
-	holdStart  atomic.Bool
-	startDelay atomic.Int64
-	failTTS    atomic.Bool
+	reportUsage atomic.Bool
+	holdTTS     atomic.Bool
+	releaseTTS  chan struct{}
+	texts       chan string
+	asr         atomic.Int32
+	tts         atomic.Int32
+	pcmBytes    atomic.Int32
+	transcript  atomic.Value
+	autoFinal   atomic.Bool
+	partial     atomic.Bool
+	holdStart   atomic.Bool
+	startDelay  atomic.Int64
+	failTTS     atomic.Bool
 }
 
 func voiceProvider(t *testing.T) (*httptest.Server, *voiceTestProvider) {
 	t.Helper()
-	p := &voiceTestProvider{texts: make(chan string, 32)}
+	p := &voiceTestProvider{texts: make(chan string, 32), releaseTTS: make(chan struct{})}
 	p.transcript.Store("第一句。第二句。")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-voice-key" {
@@ -86,7 +91,15 @@ func voiceProvider(t *testing.T) (*httptest.Server, *voiceTestProvider) {
 			}
 			id := start.Header.ID
 			emit := func(kind string, sentence map[string]any) error {
-				return c.WriteJSON(map[string]any{"header": map[string]any{"task_id": id, "event": kind}, "payload": map[string]any{"output": map[string]any{"sentence": sentence}}})
+				payload := map[string]any{"output": map[string]any{"sentence": sentence}}
+				if p.reportUsage.Load() && kind == "result-generated" {
+					if start.Payload.Task == "asr" {
+						payload["usage"] = map[string]any{"duration": 3}
+					} else {
+						payload["usage"] = map[string]any{"characters": 12}
+					}
+				}
+				return c.WriteJSON(map[string]any{"header": map[string]any{"task_id": id, "event": kind}, "payload": payload})
 			}
 			if p.holdStart.Load() {
 				if _, _, err := c.ReadMessage(); err == nil {
@@ -102,12 +115,16 @@ func voiceProvider(t *testing.T) (*httptest.Server, *voiceTestProvider) {
 			}
 			if start.Payload.Task == "asr" {
 				p.asr.Add(1)
+				var ogg []byte
 				for {
 					kind, data, err := c.ReadMessage()
 					if err != nil {
 						return
 					}
 					if kind == websocket.BinaryMessage {
+						if start.Payload.Parameters.Format == "opus" {
+							ogg = append(ogg, data...)
+						}
 						p.pcmBytes.Add(int32(len(data)))
 						if p.partial.CompareAndSwap(true, false) {
 							if emit("result-generated", map[string]any{"begin_time": 0, "text": p.transcript.Load().(string), "sentence_end": false}) != nil {
@@ -127,6 +144,12 @@ func voiceProvider(t *testing.T) (*httptest.Server, *voiceTestProvider) {
 						return
 					}
 					break
+				}
+				if start.Payload.Parameters.Format == "opus" {
+					info, err := voice.InspectOpusOgg(ogg)
+					if err != nil || info.Packets != 3 || info.DecodedSamples != 5760 || info.PreSkip != 312 {
+						t.Errorf("invalid negotiated Opus input: %+v %v", info, err)
+					}
 				}
 				if emit("result-generated", map[string]any{"begin_time": 0, "text": p.transcript.Load().(string), "sentence_end": true}) != nil {
 					return
@@ -152,6 +175,11 @@ func voiceProvider(t *testing.T) (*httptest.Server, *voiceTestProvider) {
 					text.WriteString(cmd.Payload.Input.Text)
 				}
 				p.texts <- text.String()
+				if p.reportUsage.Load() {
+					if emit("result-generated", nil) != nil {
+						return
+					}
+				}
 				if p.failTTS.CompareAndSwap(true, false) {
 					if emit("task-failed", nil) != nil {
 						return
@@ -160,7 +188,13 @@ func voiceProvider(t *testing.T) (*httptest.Server, *voiceTestProvider) {
 				}
 				size := start.Payload.Parameters.SampleRate * 2 / 50
 				pcm := bytes.Repeat([]byte{byte(p.tts.Load())}, size*2+2)
-				if c.WriteMessage(websocket.BinaryMessage, pcm[:size+1]) != nil || c.WriteMessage(websocket.BinaryMessage, pcm[size+1:]) != nil {
+				if c.WriteMessage(websocket.BinaryMessage, pcm[:size+1]) != nil {
+					return
+				}
+				if p.holdTTS.Load() {
+					<-p.releaseTTS
+				}
+				if c.WriteMessage(websocket.BinaryMessage, pcm[size+1:]) != nil {
 					return
 				}
 				if emit("task-finished", nil) != nil {
@@ -202,7 +236,7 @@ func enableVoiceFixtureWithChats(t *testing.T, f testFixture, runtime voice.Runt
 		t.Fatal(err)
 	}
 	if runtime == nil {
-		runtime = f.server.deps.Runtime
+		runtime = f.server.deps.Runtime.(voice.Runtime)
 	}
 	if chats == nil {
 		reader, ok := f.chats.(voice.ChatReader)
@@ -212,7 +246,7 @@ func enableVoiceFixtureWithChats(t *testing.T, f testFixture, runtime voice.Runt
 		chats = reader
 	}
 	cfg := config.VoiceConfig{Enabled: true, ASRModel: "voice-asr", TTSModel: "voice-tts", DefaultVoice: "configured", Voices: []string{"configured"}, MaxSentenceSilenceMS: 600, DownlinkLeadMS: 300}
-	service := voice.NewService(context.Background(), voice.Dependencies{Config: cfg, Models: f.modelRegistry, Runtime: runtime, Chats: chats, Agents: f.registry, Runs: f.runs})
+	service := voice.NewService(context.Background(), voice.Dependencies{Billing: f.cfg.Billing, Usage: f.server.deps.Conversation, Config: cfg, Models: f.modelRegistry, Runtime: runtime, Chats: chats, Agents: f.registry, Runs: f.runs})
 	f.server.deps.Voice = service
 	srv := httptest.NewServer(f.server)
 	t.Cleanup(func() { service.Close(); srv.Close() })
@@ -220,7 +254,7 @@ func enableVoiceFixtureWithChats(t *testing.T, f testFixture, runtime voice.Runt
 }
 
 func voiceHello(chatID string, rate int) map[string]any {
-	hello := map[string]any{"type": "hello", "version": 1, "agentKey": "mock-agent", "audio": map[string]any{"input": map[string]any{"codec": "pcm_s16le", "sampleRate": 16000, "channels": 1, "frameMs": 20}, "output": map[string]any{"codec": "pcm_s16le", "sampleRate": rate}}}
+	hello := map[string]any{"type": "hello", "version": 2, "timeZone": "Asia/Shanghai", "agentKey": "mock-agent", "audio": map[string]any{"input": map[string]any{"codec": "pcm_s16le", "sampleRate": 16000, "channels": 1, "frameMs": 20}, "output": map[string]any{"codec": "pcm_s16le", "sampleRate": rate}}}
 	if chatID != "" {
 		hello["chatId"] = chatID
 	}
@@ -238,7 +272,7 @@ func dialVoiceHello(t *testing.T, srv *httptest.Server, hello map[string]any) (*
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { c.Close() })
+	t.Cleanup(func() { c.Close(); voiceTurns.Delete(c) })
 	if err := c.WriteJSON(hello); err != nil {
 		t.Fatal(err)
 	}
@@ -266,21 +300,42 @@ func readVoice(t *testing.T, c *websocket.Conn) (map[string]any, []byte) {
 	return frame, nil
 }
 
+var voiceTurns sync.Map
+
+func startVoice(t *testing.T, c *websocket.Conn) error {
+	t.Helper()
+	previous, _ := voiceTurns.LoadOrStore(c, 0)
+	turn := previous.(int) + 1
+	voiceTurns.Store(c, turn)
+	if err := c.WriteJSON(map[string]any{"type": "listen", "state": "start", "turn": turn, "requestId": fmt.Sprintf("listen-%d", turn), "intent": "conversation"}); err != nil {
+		return err
+	}
+	ready, pcm := voiceUntil(t, c, "listen.ready", "")
+	if ready["turn"] != float64(turn) || ready["requestId"] != fmt.Sprintf("listen-%d", turn) {
+		t.Fatal(ready)
+	}
+	_ = pcm // Old audio may precede ready but must never follow it.
+	return nil
+}
+
+func stopVoice(c *websocket.Conn) error {
+	turn, _ := voiceTurns.Load(c)
+	return c.WriteJSON(map[string]any{"type": "listen", "state": "stop", "turn": turn, "requestId": fmt.Sprintf("listen-%d", turn)})
+}
+
 func speakVoice(t *testing.T, c *websocket.Conn) {
 	t.Helper()
-	for _, msg := range []map[string]any{{"type": "listen", "state": "start", "mode": "manual"}, {"type": "listen", "state": "start", "mode": "manual"}} {
-		if c.WriteJSON(msg) != nil {
-			t.Fatal("listen write")
-		}
+	if err := startVoice(t, c); err != nil {
+		t.Fatal(err)
 	}
 	if c.WriteMessage(websocket.BinaryMessage, make([]byte, 640)) != nil || c.WriteMessage(websocket.BinaryMessage, []byte{1, 2}) != nil {
 		t.Fatal("PCM write")
 	}
-	if c.WriteJSON(map[string]any{"type": "listen", "state": "stop", "mode": "manual"}) != nil {
-		t.Fatal("stop write")
+	if err := stopVoice(c); err != nil {
+		t.Fatal(err)
 	}
-	if c.WriteJSON(map[string]any{"type": "listen", "state": "stop", "mode": "manual"}) != nil {
-		t.Fatal("duplicate stop write")
+	if err := stopVoice(c); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -421,7 +476,7 @@ func TestVoiceAbortLateIdentityAndPendingTranscript(t *testing.T) {
 	engine := &voiceCancelEngine{first: &gatedQueryEngine{entered: make(chan struct{}), release: make(chan struct{})}}
 	f.server.deps.Agent = engine
 	bindTestRuntime(f.server)
-	runtime := &voiceDelayedRuntime{Runtime: f.server.deps.Runtime, gate: make(chan struct{}), entered: make(chan struct{})}
+	runtime := &voiceDelayedRuntime{Runtime: f.server.deps.Runtime.(voice.Runtime), gate: make(chan struct{}), entered: make(chan struct{})}
 	srv, p := enableVoiceFixture(t, f, runtime)
 	var release sync.Once
 	t.Cleanup(func() { release.Do(func() { close(runtime.gate) }) })
@@ -449,7 +504,7 @@ func TestVoiceAbortLateIdentityAndPendingTranscript(t *testing.T) {
 	}
 	release.Do(func() { close(runtime.gate) })
 	start, _ := voiceUntil(t, c, "run", "start")
-	if start["turn"] != float64(2) {
+	if start["runId"] == "" || start["turn"] != nil {
 		t.Fatalf("old Run crossed abort: %#v", start)
 	}
 	voiceUntil(t, c, "tts", "stop")
@@ -505,6 +560,85 @@ func TestVoiceDisconnectRetainsAcceptedRun(t *testing.T) {
 	}
 }
 
+func TestVoiceExpiredTicketClosesMediaWithoutCancellingRun(t *testing.T) {
+	var key *rsa.PrivateKey
+	f := newTestFixtureWithModelHandlerAndOptions(t, func(http.ResponseWriter, *http.Request) {}, testFixtureOptions{setupRuntime: func(root string, cfg *config.Config) {
+		var public string
+		key, public = writeTestJWTKeyPair(t, root)
+		cfg.Auth = config.AuthConfig{Enabled: true, LocalPublicKeyFile: public, Issuer: "device-test", RequireExpiry: true}
+	}})
+	engine := &gatedQueryEngine{entered: make(chan struct{}), release: make(chan struct{})}
+	f.server.deps.Agent = engine
+	bindTestRuntime(f.server)
+	srv, provider := enableVoiceFixture(t, f, nil)
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(engine.release) }) })
+	dial := func(device string, expiry time.Time) (*websocket.Conn, string) {
+		token := mustSignRS256JWT(t, key, map[string]any{"sub": "owner", "device_id": device, "iss": "device-test", "exp": expiry.Unix()})
+		dialer := websocket.Dialer{Subprotocols: []string{"bearer." + token}}
+		conn, _, err := dialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/api/voice/ws", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { conn.Close(); voiceTurns.Delete(conn) })
+		if err := conn.WriteJSON(voiceHello("", 16000)); err != nil {
+			t.Fatal(err)
+		}
+		hello, _ := readVoice(t, conn)
+		if hello["type"] != "hello" {
+			t.Fatal("authenticated hello failed")
+		}
+		return conn, hello["chatId"].(string)
+	}
+	c, chatID := dial("device-a", time.Now().Add(4*time.Second))
+	speakVoice(t, c)
+	voiceUntil(t, c, "run", "start")
+	select {
+	case <-engine.entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not start")
+	}
+	_ = c.SetReadDeadline(time.Now().Add(6 * time.Second))
+	for {
+		_, _, err := c.ReadMessage()
+		if err == nil {
+			continue
+		}
+		if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+			t.Fatal("expiry did not close media")
+		}
+		break
+	}
+	active, found, err := f.runs.ActiveRunForChat(chatID)
+	if err != nil || !found {
+		t.Fatal("expiry cancelled accepted Run")
+	}
+	release.Do(func() { close(engine.release) })
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		summary, _ := f.chats.Summary(chatID)
+		if summary != nil && summary.LastRunID == active.RunID && summary.LastRunContent == "before after" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expired media lost Run persistence")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// device_id does not replace the owner's existing Chat identity.
+	c2, nextChatID := dial("device-b", time.Now().Add(time.Minute))
+	if nextChatID != chatID {
+		t.Fatal("same owner changed Chat identity")
+	}
+	if err := c2.WriteJSON(map[string]any{"type": "abort"}); err != nil {
+		t.Fatal(err)
+	}
+	voiceUntil(t, c2, "abort", "")
+	if provider.tts.Load() != 0 || len(queryLines(t, f, chatID)) != 1 {
+		t.Fatal("renewed connection replayed old media or Query")
+	}
+}
+
 func TestVoiceAwaitingHintWaitsForOrdinaryUISubmit(t *testing.T) {
 	var calls atomic.Int32
 	f := newTestFixtureWithModelHandler(t, func(w http.ResponseWriter, r *http.Request) {
@@ -523,16 +657,7 @@ func TestVoiceAwaitingHintWaitsForOrdinaryUISubmit(t *testing.T) {
 		t.Fatal(awaiting)
 	}
 	voiceUntil(t, c, "tts", "stop")
-	// Even after the prompt drained, neither a repeated listen nor a voice
-	// "submit" can answer the existing question.
-	_ = c.WriteJSON(map[string]any{"type": "listen", "state": "start", "mode": "manual"})
-	_ = c.WriteJSON(map[string]any{"type": "submit"})
-	for _, code := range []string{"turn_busy", "invalid_request"} {
-		msg, _ := readVoice(t, c)
-		if msg["type"] != "error" || msg["code"] != code {
-			t.Fatal(msg)
-		}
-	}
+	// A notice does not collect an answer; ordinary UI submission remains available.
 	if p.asr.Load() != 1 || calls.Load() != 1 {
 		t.Fatal("hint stop resumed listening or answered question")
 	}
@@ -554,12 +679,18 @@ func TestVoiceAwaitingHintWaitsForOrdinaryUISubmit(t *testing.T) {
 
 type voiceCompletionFailureStore struct{ chat.Store }
 
+func (s voiceCompletionFailureStore) OnRunStarted(start chat.RunStart) error {
+	return s.Store.(chat.RunStartRecorder).OnRunStarted(start)
+}
+
 func (s voiceCompletionFailureStore) OnRunCompleted(chat.RunCompletion) error {
 	return errors.New("injected completion failure")
 }
 
 func TestVoiceDoesNotReadUnpersistedCompletion(t *testing.T) {
+	var modelCalls atomic.Int32
 	f := newTestFixtureWithModelHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		modelCalls.Add(1)
 		writeProviderSSE(t, w, `{"choices":[{"delta":{"content":"没有保存成功的正文"},"finish_reason":"stop"}]}`, "[DONE]")
 	})
 	if _, _, err := f.chats.EnsureChat("voice-unsaved", "mock-agent", "existing"); err != nil {
@@ -582,8 +713,8 @@ func TestVoiceDoesNotReadUnpersistedCompletion(t *testing.T) {
 			break
 		}
 	}
-	if p.tts.Load() != 0 {
-		t.Fatal("unpersisted completion invoked supplier TTS")
+	if p.tts.Load() != 0 || modelCalls.Load() != 1 {
+		t.Fatal("completion failure was not exercised, or invoked supplier TTS")
 	}
 }
 
@@ -605,14 +736,16 @@ func TestVoiceDoesNotPreemptOtherChatRun(t *testing.T) {
 		t.Fatal("other Run did not enter")
 	}
 	c, _ := dialVoice(t, srv, "voice-busy", 16000)
-	speakVoice(t, c)
+	if err := c.WriteJSON(map[string]any{"type": "listen", "state": "start", "requestId": "foreign-start", "turn": 1, "intent": "conversation"}); err != nil {
+		t.Fatal(err)
+	}
 	for {
 		msg, pcm := readVoice(t, c)
 		if len(pcm) > 0 || msg["type"] == "tts" || msg["type"] == "run" {
 			t.Fatal("voice executed in occupied Chat")
 		}
 		if msg["type"] == "error" {
-			if msg["code"] != "chat_busy" {
+			if msg["code"] != "invalid_request" {
 				t.Fatal(msg)
 			}
 			break
@@ -663,8 +796,11 @@ func TestVoiceAuthCapabilitiesOriginAndHelloValidation(t *testing.T) {
 		t.Fatal("wrong URL credential rejection")
 	}
 	for _, modify := range []func(map[string]any){
-		func(msg map[string]any) { msg["version"] = 2 },
+		func(msg map[string]any) { msg["version"] = 1 },
 		func(msg map[string]any) { msg["agentKey"] = "missing" },
+		func(msg map[string]any) { delete(msg, "timeZone") },
+		func(msg map[string]any) { msg["timeZone"] = "Local" },
+		func(msg map[string]any) { msg["timeZone"] = "Invalid/Zone" },
 		func(msg map[string]any) { msg["chatId"] = "missing" },
 		func(msg map[string]any) { msg["voice"] = "not-allowed" },
 		func(msg map[string]any) { msg["accessLevel"] = "full_access" },
@@ -896,7 +1032,7 @@ func TestVoicePendingTranscriptExpiresWithoutSubmitting(t *testing.T) {
 	engine := &voiceCancelEngine{first: &gatedQueryEngine{entered: make(chan struct{}), release: make(chan struct{})}}
 	f.server.deps.Agent = engine
 	bindTestRuntime(f.server)
-	runtime := &voiceDelayedRuntime{Runtime: f.server.deps.Runtime, gate: make(chan struct{}), entered: make(chan struct{})}
+	runtime := &voiceDelayedRuntime{Runtime: f.server.deps.Runtime.(voice.Runtime), gate: make(chan struct{}), entered: make(chan struct{})}
 	srv, p := enableVoiceFixture(t, f, runtime)
 	var release sync.Once
 	t.Cleanup(func() { release.Do(func() { close(runtime.gate) }) })
@@ -934,6 +1070,7 @@ func TestVoiceEmptyAndInvalidInputNeverCreateQuery(t *testing.T) {
 			var calls atomic.Int32
 			f := newTestFixtureWithModelHandler(t, func(w http.ResponseWriter, r *http.Request) { calls.Add(1); t.Error("invalid input invoked Agent") })
 			srv, p := enableVoiceFixture(t, f, nil)
+			p.reportUsage.Store(true)
 			if scenario == "empty" {
 				p.transcript.Store("")
 			}
@@ -947,13 +1084,13 @@ func TestVoiceEmptyAndInvalidInputNeverCreateQuery(t *testing.T) {
 			if scenario == "empty" || scenario == "text limit" {
 				speakVoice(t, c)
 			} else if scenario == "startup overflow" {
-				_ = c.WriteJSON(map[string]any{"type": "listen", "state": "start", "mode": "manual"})
+				_ = startVoice(t, c)
 				// One more frame than the 11s startup queue.
 				for i := 0; i < 551; i++ {
 					_ = c.WriteMessage(websocket.BinaryMessage, make([]byte, 640))
 				}
 			} else {
-				_ = c.WriteJSON(map[string]any{"type": "listen", "state": "start", "mode": "manual"})
+				_ = startVoice(t, c)
 				n := 1
 				if scenario == "large PCM" {
 					n = 642
@@ -995,7 +1132,7 @@ func TestVoiceSilentTaskLimitKeepsSessionAndDoesNotCreateRun(t *testing.T) {
 	f := newTestFixture(t)
 	srv, p := enableVoiceFixture(t, f, nil)
 	c, chatID := dialVoice(t, srv, "", 16000)
-	if err := c.WriteJSON(map[string]any{"type": "listen", "state": "start", "mode": "auto"}); err != nil {
+	if err := startVoice(t, c); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WriteMessage(websocket.BinaryMessage, make([]byte, 640)); err != nil {
@@ -1027,7 +1164,7 @@ func TestVoiceAudioLimitKeepsSilentSessionButRejectsUnfinishedSpeech(t *testing.
 			srv, p := enableVoiceFixture(t, f, nil)
 			p.partial.Store(heard)
 			c, chatID := dialVoice(t, srv, "", 16000)
-			if err := c.WriteJSON(map[string]any{"type": "listen", "state": "start", "mode": "auto"}); err != nil {
+			if err := startVoice(t, c); err != nil {
 				t.Fatal(err)
 			}
 			// Deliver 60.020s of PCM ahead of the wall-clock deadline, as browser
@@ -1081,7 +1218,7 @@ func TestVoiceAutoStopsOnSentenceFinalAndKeepsAcceptedTail(t *testing.T) {
 	srv, p := enableVoiceFixture(t, f, nil)
 	p.autoFinal.Store(true)
 	c, chatID := dialVoice(t, srv, "", 16000)
-	_ = c.WriteJSON(map[string]any{"type": "listen", "state": "start", "mode": "auto"})
+	_ = startVoice(t, c)
 	_ = c.WriteMessage(websocket.BinaryMessage, make([]byte, 640))
 	_ = c.WriteMessage(websocket.BinaryMessage, []byte{1, 2})
 	voiceUntil(t, c, "tts", "stop")
@@ -1117,20 +1254,13 @@ func TestVoiceCompletedRunWithLeftoverAwaitingEndsTurn(t *testing.T) {
 	if msg["type"] != "error" || msg["code"] != "awaiting_pending" {
 		t.Fatal(msg)
 	}
-	// The turn is closed, so the next utterance opens turn 2 instead of being dropped.
-	speakVoice(t, c)
-	for {
-		msg, _ := readVoice(t, c)
-		if msg["type"] == "error" {
-			t.Fatal(msg)
-		}
-		if msg["type"] == "stt" && msg["final"] == true {
-			if msg["turn"] != float64(2) {
-				t.Fatal(msg)
-			}
-			break
-		}
+	// A new conversation intent cannot bypass an unresolved waiting item.
+	_ = c.WriteJSON(map[string]any{"type": "listen", "state": "start", "requestId": "listen-2", "turn": 2, "intent": "conversation"})
+	rejected, _ := readVoice(t, c)
+	if rejected["type"] != "error" || rejected["code"] != "invalid_request" {
+		t.Fatal(rejected)
 	}
+
 	if p.tts.Load() != 0 {
 		t.Fatal("left-over awaiting answer was spoken")
 	}
@@ -1162,8 +1292,116 @@ func TestVoiceAwaitingHintFailureKeepsTheTurnWaiting(t *testing.T) {
 		t.Fatalf("ordinary Submit rejected: %d %s", rec.Code, rec.Body.String())
 	}
 	start, _ := voiceUntil(t, c, "tts", "start")
-	if start["text"] != "根据界面提交继续完成。" || start["turn"] != awaiting["turn"] {
+	if start["text"] != "根据界面提交继续完成。" || start["turn"] != float64(1) {
 		t.Fatal(start)
 	}
 	voiceUntil(t, c, "tts", "stop")
+}
+
+func TestVoiceListenWhileRunningPreservesRunAndDefersFinalUntilInputEnds(t *testing.T) {
+	engine := &gatedQueryEngine{entered: make(chan struct{}), release: make(chan struct{})}
+	f := newTestFixture(t)
+	f.server.deps.Agent = engine
+	bindTestRuntime(f.server)
+	srv, provider := enableVoiceFixture(t, f, nil)
+	c, chatID := dialVoice(t, srv, "", 16000)
+	speakVoice(t, c)
+	started, _ := voiceUntil(t, c, "run", "start")
+	<-engine.entered
+	provider.transcript.Store("")
+	if err := startVoice(t, c); err != nil {
+		t.Fatal(err)
+	}
+	active, found, err := f.runs.ActiveRunForChat(chatID)
+	if err != nil || !found || active.RunID != started["runId"] {
+		t.Fatal("listen cancelled or replaced Run", active, err)
+	}
+	close(engine.release)
+	voiceUntil(t, c, "run", "end")
+	if provider.tts.Load() != 0 {
+		t.Fatal("final played during input")
+	}
+	if err := stopVoice(c); err != nil {
+		t.Fatal(err)
+	}
+	final, _ := voiceUntil(t, c, "stt", "")
+	if final["pendingResult"] != true {
+		t.Fatal(final)
+	}
+	speech, oldPCM := voiceUntil(t, c, "tts", "start")
+	if speech["turn"] != float64(2) || speech["purpose"] != "final" || speech["speechId"] == "" || len(oldPCM) != 0 {
+		t.Fatal(speech, oldPCM)
+	}
+	stop, _ := voiceUntil(t, c, "tts", "stop")
+	if stop["speechId"] != speech["speechId"] || len(queryLines(t, f, chatID)) != 1 {
+		t.Fatal("speech identity or Query count changed")
+	}
+}
+
+func TestVoiceSupplementUsesExistingRunWithoutInterruptOrNewQuery(t *testing.T) {
+	engine := &gatedQueryEngine{entered: make(chan struct{}), release: make(chan struct{})}
+	f := newTestFixture(t)
+	f.server.deps.Agent = engine
+	bindTestRuntime(f.server)
+	srv, provider := enableVoiceFixture(t, f, nil)
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(engine.release) }) })
+	c, chatID := dialVoice(t, srv, "", 16000)
+	speakVoice(t, c)
+	started, _ := voiceUntil(t, c, "run", "start")
+	<-engine.entered
+	provider.transcript.Store("请补充三个例子")
+	speakVoice(t, c)
+	accepted, pcm := voiceUntil(t, c, "steer", "accepted")
+	if accepted["turn"] != float64(2) || accepted["runId"] != started["runId"] || accepted["requestId"] != "listen-2" || len(pcm) != 0 {
+		t.Fatal(accepted)
+	}
+	control, found := f.runs.Control(started["runId"].(string))
+	if !found {
+		t.Fatal("original Run lost")
+	}
+	steers := control.DrainSteers()
+	if len(steers) != 1 || steers[0].Message != "请补充三个例子" || steers[0].SteerID != accepted["steerId"] || !steers[0].RequireNoAwaiting {
+		t.Fatal(steers)
+	}
+	active, found, err := f.runs.ActiveRunForChat(chatID)
+	if err != nil || !found || active.RunID != started["runId"] || len(queryLines(t, f, chatID)) != 1 {
+		t.Fatal("supplement replaced Run", active, err)
+	}
+	release.Do(func() { close(engine.release) })
+	final, _ := voiceUntil(t, c, "tts", "start")
+	if final["turn"] != float64(2) || final["purpose"] != "final" {
+		t.Fatal(final)
+	}
+	voiceUntil(t, c, "tts", "stop")
+	if len(queryLines(t, f, chatID)) != 1 {
+		t.Fatal("supplement became a new Query")
+	}
+}
+
+func TestVoiceRuntimeResultCarriesOnlySuccessfulPersistenceTime(t *testing.T) {
+	for _, failure := range []bool{false, true} {
+		t.Run(fmt.Sprint(failure), func(t *testing.T) {
+			f := newTestFixture(t)
+			if failure {
+				f.server.deps.Chats = voiceCompletionFailureStore{f.chats}
+				bindTestRuntime(f.server)
+			}
+			before := time.Now()
+			ctx := controlscope.WithContext(context.Background(), controlscope.Scope{Transport: "voice"})
+			result, _ := f.server.deps.Runtime.ExecuteQueryWithHooks(ctx, rt.QueryCommand{AgentKey: "mock-agent", ChatID: "timing-result", Message: "hello"}, rt.QueryHooks{})
+			after := time.Now()
+			if failure {
+				if result.Completion == nil || result.FinishReason != "complete" || result.Persisted || !result.PersistedAt.IsZero() {
+					t.Fatal("failed completion write was not exercised or got a persistence timestamp")
+				}
+			} else if !result.Persisted || result.PersistedAt.Before(before) || result.PersistedAt.After(after) {
+				t.Fatal("missing/out-of-range persistence timestamp", result.PersistedAt)
+			}
+			wire, err := json.Marshal(result)
+			if err != nil || strings.Contains(string(wire), "PersistedAt") || strings.Contains(string(wire), "persistedAt") {
+				t.Fatal("internal clock leaked to wire", err)
+			}
+		})
+	}
 }

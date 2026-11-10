@@ -12,7 +12,8 @@ import (
 // EventBus subscribers, their replay window, and their delivery speed.
 func (r *ProxyEventRecorder) Result(completion chat.RunCompletion) runtimetypes.QueryResult {
 	result := runtimetypes.QueryResult{
-		ChatID: completion.ChatID, RunID: completion.RunID, Completion: &completion,
+		PersistedAt: r.persistedAt,
+		ChatID:      completion.ChatID, RunID: completion.RunID, Completion: &completion,
 		Content: completion.AssistantText, Usage: completion.Usage, FinishReason: completion.FinishReason,
 		ErrorPayload: r.errorPayload, ErrorMessage: r.errorMessage,
 	}
