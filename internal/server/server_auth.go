@@ -43,10 +43,17 @@ func (s *Server) handleCORS(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) withPrincipal(r *http.Request, w http.ResponseWriter) *http.Request {
+	authError := func() {
+		if r.URL.Path == "/api/mcp/invoke" {
+			writeJSON(w, 401, map[string]any{"code": 401, "msg": "mcp_authority_required", "data": map[string]string{"errorCode": "mcp_authority_required"}})
+			return
+		}
+		writeAuthError(w)
+	}
 	if isConnectorExecutionRoute(r.URL.Path) {
 		return r // Each exact execution route validates a restricted capability token.
 	}
-	forceAuth := r.URL.Path == "/api/connectors/execution/grants" || r.URL.Path == "/api/connectors/auth" || r.URL.Path == "/api/connectors/auth/cancel" || strings.HasPrefix(r.URL.Path, "/api/chat/artifacts/") || r.URL.Path == "/api/chat/export/resources/read" || strings.HasPrefix(r.URL.Path, "/api/desktop/")
+	forceAuth := r.URL.Path == "/api/mcp/invoke" || r.URL.Path == "/api/connectors/execution/grants" || r.URL.Path == "/api/connectors/auth" || r.URL.Path == "/api/connectors/auth/cancel" || strings.HasPrefix(r.URL.Path, "/api/chat/artifacts/") || r.URL.Path == "/api/chat/export/resources/read" || strings.HasPrefix(r.URL.Path, "/api/desktop/")
 	if (!s.deps.Config.Auth.Enabled && !forceAuth) || !strings.HasPrefix(r.URL.Path, "/api/") {
 		return r
 	}
@@ -65,7 +72,7 @@ func (s *Server) withPrincipal(r *http.Request, w http.ResponseWriter) *http.Req
 	token := ""
 	if authorization != "" {
 		if !strings.HasPrefix(authorization, "Bearer ") {
-			writeAuthError(w)
+			authError()
 			return nil
 		}
 		token = strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
@@ -80,12 +87,12 @@ func (s *Server) withPrincipal(r *http.Request, w http.ResponseWriter) *http.Req
 		}
 	}
 	if token == "" {
-		writeAuthError(w)
+		authError()
 		return nil
 	}
 	principal, err := s.authVerifier.Verify(token)
 	if err != nil {
-		writeAuthError(w)
+		authError()
 		return nil
 	}
 	return r.WithContext(WithPrincipal(r.Context(), principal))

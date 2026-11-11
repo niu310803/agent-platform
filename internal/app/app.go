@@ -44,6 +44,7 @@ import (
 	"agent-platform/internal/platformcontrol"
 	projectpkg "agent-platform/internal/project"
 	"agent-platform/internal/reload"
+	"agent-platform/internal/remotemcp"
 	"agent-platform/internal/resultsubmit"
 	"agent-platform/internal/runenvops"
 	"agent-platform/internal/runops"
@@ -501,6 +502,7 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 	var webapps *webapp.Service
 	var webappRunner *webapphost.Runner
 	var appBridge *webappbridge.Service
+	remoteMCP := &remotemcp.Service{SsoIDTokenFile: cfg.SsoIdTokenFile}
 	cleanupWebapps := true
 	if cfg.WebApps.Enabled {
 		webappRunner = webapphost.NewRunner(cfg.Paths.WebAppsDir, cfg.WebApps, webappHostStatus != nil && webappHostStatus.BackendPrerequisitesReady)
@@ -516,7 +518,7 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 	}()
 	if webapps != nil {
 		adapters := webappbridge.NewAdapters(webappbridge.AdapterOptions{Apps: webapps, Runtime: runtimeService, Registry: registry, Chats: chatStore, Artifacts: chatResourceService, Owner: cfg.Auth.AllowedSubjects[0], Root: filepath.Join(cfg.Paths.WebAppsDir, webapp.SDKStateDir)})
-		appBridge = webappbridge.New(webappbridge.Options{Apps: webapps, Owner: cfg.Auth.AllowedSubjects[0], Connectors: &connectorops.Service{Auth: connectorAuth, Sources: cfg.Paths.ConnectorSources()}, Actions: adapters.Actions()})
+		appBridge = webappbridge.New(webappbridge.Options{RemoteMCP: remoteMCP, Apps: webapps, Owner: cfg.Auth.AllowedSubjects[0], Connectors: &connectorops.Service{Auth: connectorAuth, Sources: cfg.Paths.ConnectorSources()}, Actions: adapters.Actions()})
 		if err := appBridge.ListenInternal(); err != nil {
 			return nil, fmt.Errorf("initialize WebApp bridge: %w", err)
 		}
@@ -573,6 +575,7 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 		Tools:                  toolExecutor,
 		Sandbox:                sandboxClient,
 		MCP:                    mcpClient,
+		RemoteMCP:              remoteMCP,
 		ConnectorAuth:          connectorAuth,
 		WebAppHost:             webappHostStatus,
 		MCPToolSyncStatus:      mcpToolSync,

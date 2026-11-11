@@ -187,3 +187,7 @@ python3 scripts/test-webapp-compose.py --fixture <隔离Compose目录> --repo <�
 ```
 
 该脚本会对候选执行 SIGKILL、更新回退、重启和 OOM，不能用于生产。原生 Go 验证通过 WEBAPP_NATIVE_TEST=1 开启，并以带 Node/helper 的候选镜像运行交叉编译测试；磁盘压力测试要求 /tmp 为小于 256 MiB 的独立 tmpfs。域名路由、DNS/TLS/nginx 及公网浏览器验收继续保留为明确后续工作。
+
+## 远程 MCP SDK
+
+受信运行中应用可用 `mcp.invoke(input, {signal})` 直接调用 HTTP MCP，capability 同名；沿用页面 session/CSRF 与后端短期凭据，不依赖 Desktop。身份文件不供应时明确失败，详见 [远程 MCP 调用](远程MCP调用.md)。

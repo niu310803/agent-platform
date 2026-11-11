@@ -395,3 +395,7 @@ activityArgs: [description, filePath]
 `/api/submit` 使用 `param:{decision:"approve",data}`、`param:{decision:"reject",reason?,data?}` 或 `param:{decision:"dismiss"}`。回答按 HTML 中的 name 裁剪，data JSON 最多 64 KiB；值统一为字符串，单 checkbox 为 `"true"/"false"`，checkbox 组与 select multiple 为字符串数组，未选 radio 省略，disabled 控件不收集。浏览器在提交前校验 required/pattern 等约束和 UTF-8 JSON 大小；服务器在受理、唤醒等待项之前校验声明字段的值类型、大小及原因长度。非法提交返回 400，等待项保持有效，可以修改重试；该检查覆盖普通 Run 和 Team 转发。HTML 约束不作为授权依据。
 
 校验失败后壳页面发送 `frontend_awaiting_invalid {runId,awaitingId}`，宿主立即结束收集忙状态并提示修正；拒绝不校验必填字段，仍可带已填内容；超限草稿在页面保留，拒绝时省略超限数据。超时走 `budget.hitl.form.timeout`（秒），未配置时通用回退为 600 秒；复杂看图表单可在 Agent budget 中显式设为 1800 等更长值。跨进程重启按 form 写入 `runtime_restarted`，不会恢复表单。BTW 只读执行禁止该工具；规划和确认后的执行 Run 默认均排除它。
+
+## 受信 WebApp 按 URL 调用
+
+独立入口 `/api/mcp/invoke` 与 SDK `mcp.invoke` 不经过模型或连接器安装，协议、认证、错误码与验证范围见 [远程 MCP 调用](远程MCP调用.md)。

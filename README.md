@@ -447,3 +447,5 @@ docker compose logs -f
 `builtin.kanban-control`（看板控制）独立提供 `desktop_kanban` 的六个看板动作，依赖 Desktop；原 `builtin.platform-control` 挂载不再授予看板能力。需要看板的 Agent 应显式挂载新连接器，详见 [连接器](docs/连接器.md#kanban-control-看板控制)。
 
 Query 与 steer 的技能、知识库和对话统一使用 references；对话仅传 chatId，通过 task-control 按需读取。旧选择字段硬切，详见 [引用协议](docs/引用协议.md)。
+
+按 URL 直接调用远程 MCP 的受信 WebApp 入口为 `POST /api/mcp/invoke`，无需安装连接器；HTTP 宿主鉴权、Compose SDK 与 SSO 供应边界见 [远程 MCP 调用](docs/远程MCP调用.md)。

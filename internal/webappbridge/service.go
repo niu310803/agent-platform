@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"agent-platform/internal/connectorops"
+	"agent-platform/internal/remotemcp"
 	"agent-platform/internal/webapp"
 )
 
@@ -24,12 +25,14 @@ var module []byte
 
 type Handler func(context.Context, *webapp.Scope, json.RawMessage) (any, error)
 type Options struct {
+	RemoteMCP  *remotemcp.Service
 	Apps       *webapp.Service
 	Owner      string
 	Connectors *connectorops.Service
 	Actions    map[string]Handler
 }
 type Service struct {
+	remoteMCP    *remotemcp.Service
 	apps         *webapp.Service
 	owner        string
 	connectors   *connectorops.Service
@@ -50,12 +53,16 @@ func New(options Options) *Service {
 		actions[key] = value
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{ctx: ctx, cancel: cancel, permits: make(chan struct{}, 32), apps: options.Apps, owner: options.Owner, connectors: options.Connectors, actions: actions, credentials: newCredentials()}
+	return &Service{remoteMCP: options.RemoteMCP, ctx: ctx, cancel: cancel, permits: make(chan struct{}, 32), apps: options.Apps, owner: options.Owner, connectors: options.Connectors, actions: actions, credentials: newCredentials()}
 }
 func SDKModule() []byte                      { return module }
 func (s *Service) Module() []byte            { return SDKModule() }
 func sdkError(code string, status int) error { return &webapp.Error{Code: code, Status: status} }
 func errorCode(err error) (string, int) {
+	var remote *remotemcp.Error
+	if errors.As(err, &remote) {
+		return remote.Code, remote.Status
+	}
 	var op *connectorops.Error
 	if errors.As(err, &op) {
 		return op.Code, op.Status
@@ -171,6 +178,18 @@ func (s *Service) connectorScope(scope *webapp.Scope) connectorops.Scope {
 }
 func (s *Service) call(ctx context.Context, scope *webapp.Scope, action string, args json.RawMessage) (any, error) {
 	switch action {
+	case "mcp.invoke":
+		if s.remoteMCP == nil {
+			return nil, sdkError("mcp_unavailable", 503)
+		}
+		if strings.TrimSpace(s.owner) == "" || scope == nil || scope.Check == nil || scope.Check() != nil {
+			return nil, sdkError("app_grant_required", 403)
+		}
+		input, err := remotemcp.Decode(args)
+		if err != nil {
+			return nil, err
+		}
+		return s.remoteMCP.Invoke(ctx, input)
 	case "desktop.capabilities.list":
 		var empty struct{}
 		if err := decode(args, &empty); err != nil {
@@ -272,11 +291,14 @@ func (s *Service) call(ctx context.Context, scope *webapp.Scope, action string, 
 }
 func (s *Service) capabilities(scope *webapp.Scope) any {
 	states := []map[string]any{}
-	all := strings.Fields("auth.session assistant.chat assistant.execute assistant.image connector.execute skill.read artifact.read kanban.read artifact.present desktop.permissions desktop.theme desktop.locale desktop.connector.authenticate desktop.browser.external desktop.dialog.files desktop.dialog.directories desktop.dialog.savePath desktop.microphone desktop.clipboard.write desktop.notification automation.manage desktop.screen.capture desktop.clipboard.read desktop.file.reveal desktop.window desktop.camera desktop.share")
+	all := strings.Fields("auth.session assistant.chat assistant.execute assistant.image connector.execute mcp.invoke skill.read artifact.read kanban.read artifact.present desktop.permissions desktop.theme desktop.locale desktop.connector.authenticate desktop.browser.external desktop.dialog.files desktop.dialog.directories desktop.dialog.savePath desktop.microphone desktop.clipboard.write desktop.notification automation.manage desktop.screen.capture desktop.clipboard.read desktop.file.reveal desktop.window desktop.camera desktop.share")
 	for _, id := range all {
 		supported := false
 		granted := false
 		switch id {
+		case "mcp.invoke":
+			supported = s.remoteMCP != nil
+			granted = supported && s.owner != ""
 		case "connector.execute":
 			supported = s.connectors != nil
 			granted = len(scope.Policy.Connectors) > 0

@@ -36,6 +36,7 @@ import (
 	"agent-platform/internal/memory"
 	"agent-platform/internal/models"
 	projectpkg "agent-platform/internal/project"
+	"agent-platform/internal/remotemcp"
 	runtimeproxy "agent-platform/internal/runtime/proxy"
 	"agent-platform/internal/runtime/runstate"
 	"agent-platform/internal/runtime/session"
@@ -83,6 +84,7 @@ type QueryRuntime interface {
 }
 
 type Dependencies struct {
+	RemoteMCP              *remotemcp.Service
 	Voice                  *voice.Service
 	WebApps                *webapp.Service
 	WebAppActions          webappgateway.Actions

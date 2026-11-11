@@ -258,3 +258,5 @@ Agent 默认档位声明为 `accessConfig.default`（ask_for_approval/auto_appro
 
 
 请求权限 `default`（或省略）是后台默认选择器，不再是请求审批档位；具体权限统一为 ask_for_approval/auto_approve/full_access。普通 Query、execute、side query 与子执行器按目标 Agent 配置解析，未配置回退 ask_for_approval；Automation 的场景默认保持 ask_for_approval。Run、顶层 JSONL 决策与权限事件只使用具体值，原始 query 保留调用方 default/省略。旧历史 default 冻结决定及旧 Agent/策略配置按原请求审批语义读取，不能重算为当前 Agent 高默认。Composer 只有三个具体档位，未明确选择时发送 default 并显示后台解析档位，运行观察不变成显式选择。
+
+远程 HTTP MCP 的受信 WebApp 调用由 `internal/remotemcp` 独立承接，HTTP `/api/mcp/invoke` 与 Compose `mcp.invoke` 共用核心；不改变 connectorops 拒绝 OneID 的边界。身份仅消费既有 SSO ID token 文件，见 [远程 MCP 调用](docs/远程MCP调用.md)。

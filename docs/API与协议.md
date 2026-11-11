@@ -1624,3 +1624,7 @@ owner 管理详情返回安装记录、Manifest、policy、用户配置及配置
 Node 通过固定 loopback 的 `/webapps/session` 和 `/webapps/actions/call` 使用绑定代次的应用能力凭证；前者只接受 bootstrap 凭证，后者只接受短期 action token，均拒绝浏览器 Origin。应用凭证不被平台 JWT 或连接器 HTTP grant 接口接受。连接器调用进程内中立 scope，不生成伪造 deviceId。精确 action 与可用性由 capabilities 回应，不开放通用 Desktop Action 转发。
 
 工作会话查询复用 GET /api/chats?openedBy=<agentKey>，与 agentKey 取交集，主 WS chats 帧接受相同字段；subject 来自可信上下文，不接受调用方指定。重启清空 mail 后工作列表为空。
+
+## 远程 MCP 调用
+
+`POST /api/mcp/invoke` 提供受信宿主按 URL 的非模型 MCP 调用，强制已验证 app scope 和设备身份。请求、原生结果封装、错误码及 Compose 对应入口见 [远程 MCP 调用](远程MCP调用.md)。

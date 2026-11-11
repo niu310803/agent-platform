@@ -255,6 +255,7 @@ func (s *Server) routes() {
 	s.router.HandleFunc("/api/monitor/channels", s.method(http.MethodGet, s.handleMonitorChannels))
 	s.router.HandleFunc("/api/monitor/ws/connections", s.method(http.MethodGet, s.handleMonitorWSConnections))
 	s.router.HandleFunc("/api/monitor/ws/messages", s.method(http.MethodGet, s.handleMonitorWSMessages))
+	s.router.HandleFunc("/api/mcp/invoke", s.handleMCPInvoke)
 	s.router.HandleFunc("/api/connectors/execution/grants", s.handleConnectorExecutionGrant)
 	s.router.HandleFunc("/api/connectors/auth", s.handleTrustedConnectorAuth)
 	s.router.HandleFunc("/api/connectors/auth/cancel", s.handleTrustedConnectorAuth)
