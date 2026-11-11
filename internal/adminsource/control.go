@@ -430,6 +430,9 @@ func (s *ControlService) ValidateProject(t ControlTarget, content string) error 
 }
 
 func (s *ControlService) Prepare(c ControlChange, caller string) (*ControlPlan, error) {
+	if s.Config.SingleWebApp() {
+		return nil, fmt.Errorf("single WebApp sources are read-only")
+	}
 	if c.Action != "apply" && c.Action != "delete" {
 		return nil, fmt.Errorf("unsupported action")
 	}

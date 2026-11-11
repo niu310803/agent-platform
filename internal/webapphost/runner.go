@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,8 @@ type Runner struct {
 	config config.WebAppsConfig
 	root   string
 	ready  bool
+	node   string
+	single bool
 	mu     sync.Mutex
 	ports  map[int]bool
 	bridge BridgeFactory
@@ -38,6 +41,14 @@ type Runner struct {
 
 func NewRunner(root string, cfg config.WebAppsConfig, ready bool) *Runner {
 	return &Runner{root: root, config: cfg, ready: ready, ports: map[int]bool{}}
+}
+func (r *Runner) SetRoot(root string) { r.root = root }
+func (r *Runner) SetNode(node string) {
+	if node == "" {
+		node = NodePath
+	}
+	r.node = node
+	r.single = true
 }
 func (r *Runner) SetBridge(factory BridgeFactory) { r.mu.Lock(); r.bridge = factory; r.mu.Unlock() }
 func (r *Runner) Ready() bool                     { return r.ready }
@@ -82,6 +93,7 @@ type process struct {
 	onUnavailable func(string)
 	lease         string
 	logs          []*rotationWriter
+	direct        bool
 }
 
 func (p *process) Address() string          { return p.address }
@@ -114,11 +126,13 @@ func (r *Runner) Start(ctx context.Context, spec webapp.RuntimeSpec) (webapp.Pro
 	if !r.ready || spec.Manifest.Backend == nil {
 		return nil, runtimeError("webapp_backend_unavailable")
 	}
-	if err := verifyExecutable(NodePath, "/opt/node/node.sha256"); err != nil {
-		return nil, runtimeError("webapp_backend_unavailable")
-	}
-	if err := verifyExecutable(SupervisorPath, "/opt/libexec/webapp-supervisor.sha256"); err != nil {
-		return nil, runtimeError("webapp_backend_unavailable")
+	if runtime.GOOS == "linux" {
+		if err := verifyExecutable(NodePath, "/opt/node/node.sha256"); err != nil {
+			return nil, runtimeError("webapp_backend_unavailable")
+		}
+		if err := verifyExecutable(SupervisorPath, "/opt/libexec/webapp-supervisor.sha256"); err != nil {
+			return nil, runtimeError("webapp_backend_unavailable")
+		}
 	}
 	leasePath := filepath.Join(spec.ManagementRoot, "generation.lock")
 	lease, err := lockGeneration(leasePath)
@@ -217,12 +231,47 @@ func (r *Runner) Start(ctx context.Context, spec webapp.RuntimeSpec) (webapp.Pro
 	for _, port := range spec.Policy.ConnectPorts {
 		ports = append(ports, strconv.Itoa(port))
 	}
-	args := []string{"--run", spec.CodeRoot, spec.DataRoot, tmp, configFile, strconv.Itoa(port), strconv.Itoa(bridgePort), strings.Join(ports, ","), strconv.Itoa(b.ShutdownTimeoutMS), "--", NodePath,
-		"--permission", "--no-addons", "--max-old-space-size=" + strconv.Itoa(r.config.Backend.MaxOldSpaceSizeMB), "--allow-fs-read=" + spec.CodeRoot, "--allow-fs-read=" + spec.DataRoot, "--allow-fs-read=" + tmp, "--allow-fs-read=" + configFile, "--allow-fs-write=" + spec.DataRoot, "--allow-fs-write=" + tmp, filepath.Join(spec.CodeRoot, filepath.FromSlash(b.Command.Entry))}
-	args = append(args, b.Args...)
+	node := NodePath
+	if r.node != "" {
+		node = r.node
+	}
+	readPaths := []string{spec.CodeRoot, spec.DataRoot, tmp, configFile}
+	if r.single {
+		readPaths = []string{filepath.Join(spec.CodeRoot, "webapp.json"), filepath.Join(spec.CodeRoot, spec.Manifest.Frontend.Root), spec.DataRoot, tmp, configFile}
+		if spec.Manifest.Backend != nil {
+			readPaths = append(readPaths, filepath.Join(spec.CodeRoot, "backend"))
+		}
+	}
+	nodeArgs := []string{"--permission", "--no-addons", "--max-old-space-size=" + strconv.Itoa(r.config.Backend.MaxOldSpaceSizeMB)}
+	for _, path := range readPaths {
+		nodeArgs = append(nodeArgs, "--allow-fs-read="+path)
+	}
+	nodeArgs = append(nodeArgs, "--allow-fs-write="+spec.DataRoot, "--allow-fs-write="+tmp, filepath.Join(spec.CodeRoot, filepath.FromSlash(b.Command.Entry)))
+	nodeArgs = append(nodeArgs, b.Args...)
+	mode := "--run"
+	if r.single {
+		mode = "--run-single"
+	}
+	args := []string{mode, spec.CodeRoot, spec.DataRoot, tmp, configFile, strconv.Itoa(port), strconv.Itoa(bridgePort), strings.Join(ports, ","), strconv.Itoa(b.ShutdownTimeoutMS), "--", node}
+	args = append(args, nodeArgs...)
 	cmd := exec.Command(SupervisorPath, args...)
+	if runtime.GOOS != "linux" {
+		exe, e := os.Executable()
+		if e != nil {
+			return nil, e
+		}
+		cmd = exec.Command(exe, append([]string{"webapp-child", strconv.Itoa(b.ShutdownTimeoutMS), leasePath, node}, nodeArgs...)...)
+		cmd.Stdin = controlRead
+	}
 	cmd.Dir = spec.CodeRoot
-	env := map[string]string{"PATH": "/opt/node/bin:/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC", "HOST": "127.0.0.1", "PORT": strconv.Itoa(port), "HOME": tmp, "TMPDIR": tmp, "TMP": tmp, "TEMP": tmp, "NODE_ENV": "production", "WEBAPP_ID": spec.ID, "WEBAPP_KEY": spec.Manifest.Key, "WEBAPP_DIR": spec.CodeRoot, "WEBAPP_DATA_DIR": spec.DataRoot, "WEBAPP_USER_CONFIG_FILE": configFile}
+	env := map[string]string{"PATH": filepath.Dir(node) + string(os.PathListSeparator) + "/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC", "HOST": "127.0.0.1", "PORT": strconv.Itoa(port), "HOME": tmp, "TMPDIR": tmp, "TMP": tmp, "TEMP": tmp, "NODE_ENV": "production", "WEBAPP_ID": spec.ID, "WEBAPP_KEY": spec.Manifest.Key, "WEBAPP_DIR": spec.CodeRoot, "WEBAPP_DATA_DIR": spec.DataRoot, "WEBAPP_USER_CONFIG_FILE": configFile}
+	if runtime.GOOS == "windows" {
+		for _, key := range []string{"SystemRoot", "WINDIR", "ComSpec"} {
+			if value := os.Getenv(key); value != "" {
+				env[key] = value
+			}
+		}
+	}
 	for key, value := range b.Env {
 		env[key] = value
 	}
@@ -245,7 +294,9 @@ func (r *Runner) Start(ctx context.Context, spec webapp.RuntimeSpec) (webapp.Pro
 	for _, key := range keys {
 		cmd.Env = append(cmd.Env, key+"="+env[key])
 	}
-	cmd.ExtraFiles = []*os.File{controlRead, statusWrite, lease}
+	if runtime.GOOS == "linux" {
+		cmd.ExtraFiles = []*os.File{controlRead, statusWrite, lease}
+	}
 	out, err := newRotationWriter(filepath.Join(spec.ManagementRoot, "logs"), "stdout", r.config.Logs)
 	if err != nil {
 		controlWrite.Close()
@@ -261,13 +312,19 @@ func (r *Runner) Start(ctx context.Context, spec webapp.RuntimeSpec) (webapp.Pro
 	}
 	cmd.Stdout = out
 	cmd.Stderr = stderr
-	p := &process{onUnavailable: spec.OnUnavailable, address: "127.0.0.1:" + strconv.Itoa(port), command: cmd, control: controlWrite, done: make(chan struct{}), lease: leasePath, logs: []*rotationWriter{out, stderr}}
+	p := &process{direct: runtime.GOOS != "linux", onUnavailable: spec.OnUnavailable, address: "127.0.0.1:" + strconv.Itoa(port), command: cmd, control: controlWrite, done: make(chan struct{}), lease: leasePath, logs: []*rotationWriter{out, stderr}}
+	if p.direct {
+		lease.Close()
+	}
 	if err := cmd.Start(); err != nil {
 		out.Close()
 		stderr.Close()
 		statusRead.Close()
 		controlWrite.Close()
 		return nil, runtimeError("webapp_supervisor_start_failed")
+	}
+	if p.direct {
+		p.nodePID = cmd.Process.Pid
 	}
 	controlRead.Close()
 	statusWrite.Close()
@@ -308,7 +365,7 @@ func (r *Runner) Start(ctx context.Context, spec webapp.RuntimeSpec) (webapp.Pro
 		state := p.status
 		reason := p.reason
 		p.mu.Unlock()
-		clean := state.Event == "exited" && state.Clean
+		clean := p.direct || state.Event == "exited" && state.Clean
 		// If the outer watcher was killed, its inner subreaper retains the lease
 		// until every descendant exits. A new generation must acquire that lock.
 		if !clean {
@@ -337,6 +394,9 @@ func (r *Runner) Start(ctx context.Context, spec webapp.RuntimeSpec) (webapp.Pro
 		}
 		if code == 77 {
 			reason = "webapp_isolation_required"
+		}
+		if p.direct && code == 78 {
+			clean = false
 		}
 		if !clean {
 			reason = "webapp_stop_incomplete"
@@ -380,7 +440,7 @@ func (p *process) healthy(ctx context.Context, b *webapp.Backend) error {
 	p.mu.Lock()
 	pid := p.nodePID
 	p.mu.Unlock()
-	if pid <= 0 || !ownsLoopbackPort(pid, p.address) {
+	if pid <= 0 || (!p.direct && !ownsLoopbackPort(pid, p.address)) {
 		return fmt.Errorf("not listening")
 	}
 	check, cancel := context.WithTimeout(ctx, 2*time.Second)

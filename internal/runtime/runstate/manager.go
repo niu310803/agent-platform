@@ -59,6 +59,22 @@ type Manager struct {
 	maintenanceIdle       func(string)
 }
 
+// Activity counts live work, including runs waiting for human input.
+func (m *Manager) Activity() (running, awaiting int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	running = len(m.chatMaintenance)
+	for _, state := range m.runs {
+		if state.completedAt.IsZero() {
+			running++
+			if len(state.control.ActiveAwaitings()) > 0 {
+				awaiting++
+			}
+		}
+	}
+	return
+}
+
 func NewManager() *Manager {
 	return &Manager{
 		runs:                  map[string]*managedRun{},

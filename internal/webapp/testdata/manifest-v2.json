@@ -412,6 +412,205 @@
           }
         }
       }
+    },
+    {
+      "name": "platform static application",
+      "valid": true,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0"
+      }
+    },
+    {
+      "name": "platform Node application",
+      "valid": true,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "http",
+            "path": "/api/health"
+          }
+        }
+      }
+    },
+    {
+      "name": "platform rejects missing minimum version",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform"
+      }
+    },
+    {
+      "name": "platform rejects Desktop Kanban",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "desktopBridge": {
+          "version": 1,
+          "kanbanRead": true
+        }
+      }
+    },
+    {
+      "name": "platform rejects Desktop agent selection",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "userConfig": {
+          "fields": [
+            {
+              "type": "select",
+              "name": "reviewer",
+              "label": "Reviewer",
+              "source": "desktop.agents"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "platform rejects Desktop Node type",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "electron-node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "tcp"
+          }
+        }
+      }
+    },
+    {
+      "name": "platform rejects runtime backend",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "runtime",
+            "runtime": "python",
+            "entry": "backend/main.py"
+          },
+          "health": {
+            "type": "tcp"
+          }
+        }
+      }
+    },
+    {
+      "name": "platform rejects permission environment override",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "http",
+            "path": "/api/health"
+          },
+          "env": {
+            "NODE_OPTIONS": "--allow-child-process"
+          }
+        }
+      }
     }
   ]
 }

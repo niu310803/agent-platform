@@ -156,6 +156,14 @@ func (s *Server) newWSHandler(hub *ws.Hub) *ws.Handler {
 
 func (s *Server) logWSDispatch(next ws.RouteHandler) ws.RouteHandler {
 	return func(ctx context.Context, conn *ws.Conn, req ws.RequestFrame) {
+		if s.deps.Config.SingleWebApp() {
+			if !singleRouteAllowed(req.Type, "POST") {
+				conn.SendError(req.ID, "module_disabled", 404, "module disabled", nil)
+				conn.CompleteRequest(req.ID)
+				return
+			}
+			defer s.beginSingleRequest()()
+		}
 		if next == nil {
 			return
 		}

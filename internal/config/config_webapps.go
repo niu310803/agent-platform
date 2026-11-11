@@ -19,16 +19,17 @@ type WebAppHostMode string
 const (
 	WebAppHostDisabled WebAppHostMode = "disabled"
 	WebAppHostCompose  WebAppHostMode = "compose"
+	WebAppHostSingle   WebAppHostMode = "single"
 )
 
 func ParseWebAppHostMode(value string) (WebAppHostMode, error) {
 	switch WebAppHostMode(strings.TrimSpace(value)) {
 	case "", WebAppHostDisabled:
 		return WebAppHostDisabled, nil
-	case WebAppHostCompose:
-		return WebAppHostCompose, nil
+	case WebAppHostCompose, WebAppHostSingle:
+		return WebAppHostMode(strings.TrimSpace(value)), nil
 	default:
-		return "", fmt.Errorf("webapp-host must be disabled or compose")
+		return "", fmt.Errorf("webapp-host must be disabled, compose or single")
 	}
 }
 
@@ -214,6 +215,15 @@ func validWebAppDomain(value string) bool {
 }
 
 func (c *Config) validateWebApps(goos string) error {
+	if c.WebAppHost == WebAppHostSingle {
+		if c.RuntimeMode != RuntimeModeStandalone || (goos != "linux" && goos != "darwin" && goos != "windows") {
+			return fmt.Errorf("single WebApp requires standalone on Linux, macOS or Windows")
+		}
+		if c.Auth.JWKSURI != "" && (!c.Auth.Enabled || !c.Auth.RequireExpiry || c.Auth.Issuer == "" || c.Auth.Audience == "" || len(c.Auth.AllowedSubjects) != 1 || c.Auth.AllowedSubjects[0] == "") {
+			return fmt.Errorf("single WebApp JWKS requires issuer, audience, expiry and one owner")
+		}
+		return c.WebApps.validateLimits()
+	}
 	if !c.WebApps.Enabled {
 		return nil
 	}

@@ -21,7 +21,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#define PROTOCOL_VERSION 3
+#define PROTOCOL_VERSION 4
 #define REQUIRED_ABI 4
 #define FS_READ_FILE (1ULL << 2)
 #define FS_READ_DIR (1ULL << 3)
@@ -285,7 +285,17 @@ static int restrict_node(char **argv) {
         (1ULL << 7) | (1ULL << 8) | (1ULL << 9) | (1ULL << 10) |
         (1ULL << 12) | (1ULL << 13) | (1ULL << 14);
     int result = -1;
-    if (add_path(rules, argv[2], read) < 0 || add_path(rules, argv[3], write) < 0 ||
+    if (strcmp(argv[1], "--run-single") == 0) {
+    char item[PATH_MAX];
+    const char *items[] = {"webapp.json", "frontend", "backend", NULL};
+    for (int i = 0; items[i]; i++) {
+        if (snprintf(item, sizeof(item), "%s/%s", argv[2], items[i]) >= (int)sizeof(item)) goto done;
+        struct stat st;
+        if (lstat(item, &st) < 0) { if (errno == ENOENT && i == 2) continue; goto done; }
+        if (S_ISLNK(st.st_mode) || add_path(rules, item, S_ISDIR(st.st_mode) ? read : FS_READ_FILE) < 0) goto done;
+    }
+    } else if (add_path(rules, argv[2], read) < 0) goto done;
+    if (add_path(rules, argv[3], write) < 0 ||
         add_path(rules, argv[4], write) < 0 || add_path(rules, argv[5], FS_READ_FILE) < 0 ||
         add_path(rules, "/opt/node/bin/node", FS_READ_FILE | 1ULL) < 0) goto done;
     const char *dirs[] = {"/lib/x86_64-linux-gnu", "/usr/lib/x86_64-linux-gnu", "/usr/share/zoneinfo", NULL};
@@ -368,7 +378,7 @@ static int run_application(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-    if (argc >= 2 && strcmp(argv[1], "--run") == 0) return run_application(argc, argv);
+    if (argc >= 2 && (strcmp(argv[1], "--run") == 0 || strcmp(argv[1], "--run-single") == 0)) return run_application(argc, argv);
     if (argc == 2 && strcmp(argv[1], "--probe") == 0) return probe();
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
         puts("webapp-supervisor protocol=3");

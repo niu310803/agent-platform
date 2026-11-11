@@ -37,6 +37,18 @@
         "win32-x64"
       ]
     },
+    "hosting": {
+      "default": "desktop",
+      "type": "string",
+      "enum": [
+        "desktop",
+        "platform"
+      ]
+    },
+    "minPlatformVersion": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$"
+    },
     "appConfig": {
       "default": {},
       "type": "object",
@@ -427,6 +439,25 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "node"
+                },
+                "entry": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "required": [
+                "type",
+                "entry"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "electron-node"
                 },
                 "entry": {
@@ -688,6 +719,7 @@
     "label",
     "version",
     "target",
+    "hosting",
     "appConfig",
     "frontend",
     "desktopBridge"

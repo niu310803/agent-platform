@@ -100,6 +100,9 @@ func (s *ControlService) ImportReceipt(invocation, requestDigest string) (map[st
 // PrepareArchiveImport uses existing package parsers and unpublished candidates.
 // The reader must be an immutable snapshot obtained after file access admission.
 func (s *ControlService) PrepareArchiveImport(ctx context.Context, req ArchiveImportRequest, source io.ReaderAt, size int64) (plan *ArchiveImportPlan, err error) {
+	if s.Config.SingleWebApp() {
+		return nil, fmt.Errorf("single WebApp sources are read-only")
+	}
 	p := &ArchiveImportPlan{Request: req, Before: map[string]any{}, After: map[string]any{}}
 	defer func() {
 		if err != nil {

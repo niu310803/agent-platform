@@ -23,7 +23,7 @@ const (
 	NodePath            = "/opt/node/bin/node"
 	SupervisorPath      = "/opt/libexec/webapp-supervisor"
 	RequiredLandlockABI = 4
-	ProtocolVersion     = 3
+	ProtocolVersion     = 4
 )
 
 type Issue struct {
@@ -165,6 +165,14 @@ func runProbe(ctx context.Context, path string, args ...string) ([]byte, error) 
 	// No env_file, HOME, NODE_OPTIONS, LD_PRELOAD or credentials are inherited.
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
 	cmd.Dir = "/"
+	if runtime.GOOS == "windows" {
+		cmd.Dir = filepath.VolumeName(path) + string(filepath.Separator)
+		for _, key := range []string{"SystemRoot", "WINDIR"} {
+			if value := os.Getenv(key); value != "" {
+				cmd.Env = append(cmd.Env, key+"="+value)
+			}
+		}
+	}
 	cmd.WaitDelay = time.Second
 	var output boundedOutput
 	cmd.Stdout = &output

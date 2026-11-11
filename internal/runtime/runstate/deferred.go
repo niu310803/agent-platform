@@ -20,6 +20,8 @@ func NewDeferredAwaitingStore() *DeferredAwaitingStore {
 	return &DeferredAwaitingStore{items: map[string]DeferredAwaiting{}}
 }
 
+func (s *DeferredAwaitingStore) Count() int { s.mu.Lock(); defer s.mu.Unlock(); return len(s.items) }
+
 func (s *DeferredAwaitingStore) Register(item DeferredAwaiting) {
 	if s == nil {
 		return

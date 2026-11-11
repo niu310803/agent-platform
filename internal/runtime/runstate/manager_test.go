@@ -157,3 +157,15 @@ func TestManagerObserverLimitsAndReplayWindow(t *testing.T) {
 	}
 	m.DetachObserver("run", replacement.ID)
 }
+
+func TestActivityKeepsLiveRunsBusyUntilFinished(t *testing.T) {
+	m := newTestManager(t)
+	m.Register(context.Background(), contracts.QuerySession{RunID: "single-idle", ChatID: "single-chat"})
+	if running, awaiting := m.Activity(); running != 1 || awaiting != 0 {
+		t.Fatalf("wrong activity: %d %d", running, awaiting)
+	}
+	m.Finish("single-idle")
+	if running, awaiting := m.Activity(); running != 0 || awaiting != 0 {
+		t.Fatalf("finished run kept host busy: %d %d", running, awaiting)
+	}
+}

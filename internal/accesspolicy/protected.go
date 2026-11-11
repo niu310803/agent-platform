@@ -53,5 +53,12 @@ func PlatformControlReadonlyRoots(cfg config.Config) []string {
 			roots = append(roots, path)
 		}
 	}
+	if cfg.SingleWebApp() {
+		root := filepath.Dir(cfg.Paths.AgentsDir)
+		for _, name := range []string{"webapp.json", "frontend", "backend", "assets", "skills-center", "connectors-center"} {
+			roots = append(roots, filepath.Join(root, name))
+		}
+		roots = append(roots, cfg.Paths.RegistriesDir)
+	}
 	return roots
 }

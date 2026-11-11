@@ -2,11 +2,8 @@
 
 package webapphost
 
-import (
-	"fmt"
-	"os"
-)
+import "os"
 
-func lockGeneration(string) (*os.File, error) { return nil, fmt.Errorf("Linux Compose only") }
-func ownsLoopbackPort(int, string) bool       { return false }
-func processTreeRSS(int) uint64               { return 0 }
+func lockGeneration(path string) (*os.File, error) { return claimGeneration(path) }
+func ownsLoopbackPort(int, string) bool            { return false }
+func processTreeRSS(int) uint64                    { return 0 }

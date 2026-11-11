@@ -70,3 +70,5 @@
 - [手工测试用例](手工测试用例.md)：回归入口与环境要求。
 
 - [远程 MCP 调用](远程MCP调用.md)：受信 WebApp 按 URL 调用、宿主鉴权与 SSO 文件供应。
+
+- [WebApp 独立实例](WebApp独立实例.md)：single 装配、Desktop 启动/owner/ticket/idle 契约、只读包与 Node 权限、验证边界。

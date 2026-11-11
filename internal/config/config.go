@@ -32,6 +32,8 @@ type Config struct {
 	SsoIdTokenFile   string
 	RuntimeMode      RuntimeMode
 	WebAppHost       WebAppHostMode
+	ListenAddress    string
+	WebAppNode       string
 	WebApps          WebAppsConfig
 	Server           ServerConfig
 	Paths            PathsConfig
@@ -83,6 +85,10 @@ type LoadOptions struct {
 	SsoIdTokenFile string
 	RuntimeMode    string
 	WebAppHost     string
+	Listen         string
+	ReadyFile      string
+	ParentPID      int
+	WebAppNode     string
 	// IgnoreRemovedWorkingDirectoryForAudit is reserved for the read-only
 	// workspace/chat migration audit. Normal startup must leave it false.
 	IgnoreRemovedWorkingDirectoryForAudit bool
@@ -757,11 +763,16 @@ func Load(optionValues ...LoadOptions) (Config, error) {
 		return Config{}, err
 	}
 	cfg.applyEnv(options)
+	cfg.ListenAddress = strings.TrimSpace(options.Listen)
+	cfg.WebAppNode = strings.TrimSpace(options.WebAppNode)
 	if options.Port != "" {
 		cfg.Server.Port = options.Port
 	}
 	if err := cfg.normalize(options.ConfigDir); err != nil {
 		return Config{}, err
+	}
+	if cfg.WebAppHost == WebAppHostSingle {
+		cfg.configureSingle()
 	}
 	ssoIdTokenFile, err := ResolveSsoIdTokenFile(cfg.Paths.StateDir, options.SsoIdTokenFile)
 	if err != nil {
@@ -861,6 +872,9 @@ func pathWithin(path string, root string) bool {
 }
 
 func (c Config) ServerAddress() string {
+	if c.ListenAddress != "" {
+		return c.ListenAddress
+	}
 	return ":" + c.Server.Port
 }
 

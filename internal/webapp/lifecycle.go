@@ -75,7 +75,9 @@ func (s *Service) start(ctx context.Context, id string, request StateRequest) (E
 	s.mu.Unlock()
 	var integrityErr error
 	if verified != nil {
-		integrityErr = verifyInstalledCode(filepath.Join(s.root, id, "app"), *verified)
+		if s.singleRoot == "" {
+			integrityErr = verifyInstalledCode(s.codeRoot(id), *verified)
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -261,7 +263,7 @@ func (s *Service) acquire(id, expectedGeneration, expectedPolicy string, interna
 	}
 	generation := a.generation
 	appCtx := a.ctx
-	return &Scope{InstallationID: r.InstallationID, BackendAddress: address, Entry: s.entry(r), Manifest: r.Manifest, Policy: policy, UserConfig: values, CodeRoot: filepath.Join(s.root, id, "app"), DataRoot: filepath.Join(s.dataRoot, id), Generation: a.generation, Context: a.ctx, Release: func() { once.Do(a.leases.Done) }, Check: func() error {
+	return &Scope{InstallationID: r.InstallationID, BackendAddress: address, Entry: s.entry(r), Manifest: r.Manifest, Policy: policy, UserConfig: values, CodeRoot: s.codeRoot(id), DataRoot: s.appDataRoot(id), Generation: a.generation, Context: a.ctx, Release: func() { once.Do(a.leases.Done) }, Check: func() error {
 		if appCtx.Err() != nil {
 			return fail("app_grant_required", 403)
 		}
@@ -417,7 +419,7 @@ func (s *Service) runBackend(id string, a *activeApp, r Record, policy Policy) {
 		values, _, configError := s.readUserConfig(id)
 		appCtx := a.ctx
 		s.mu.Unlock()
-		spec := RuntimeSpec{ID: id, InstallationID: r.InstallationID, Generation: generation, CodeRoot: filepath.Join(s.root, id, "app"), DataRoot: filepath.Join(s.dataRoot, id), ManagementRoot: filepath.Join(s.root, id), Manifest: r.Manifest, Policy: policy, UserConfig: values, Context: appCtx, Check: func() error { return s.instanceCheck(id, generation, policy.Revision) }}
+		spec := RuntimeSpec{ID: id, InstallationID: r.InstallationID, Generation: generation, CodeRoot: s.codeRoot(id), DataRoot: s.appDataRoot(id), ManagementRoot: filepath.Join(s.root, id), Manifest: r.Manifest, Policy: policy, UserConfig: values, Context: appCtx, Check: func() error { return s.instanceCheck(id, generation, policy.Revision) }}
 		spec.OnUnavailable = func(reason string) {
 			s.mu.Lock()
 			if s.active[id] == a && a.generation == generation && a.state != "stopping" {

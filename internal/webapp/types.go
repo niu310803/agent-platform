@@ -23,18 +23,20 @@ func ErrorCode(err error) (string, int) {
 }
 
 type Manifest struct {
-	SchemaVersion int             `json:"schemaVersion"`
-	ID            string          `json:"id"`
-	Key           string          `json:"key"`
-	Label         string          `json:"label"`
-	Version       string          `json:"version"`
-	Target        string          `json:"target"`
-	AppConfig     map[string]any  `json:"appConfig"`
-	UserConfig    *UserConfig     `json:"userConfig,omitempty"`
-	Frontend      Frontend        `json:"frontend"`
-	Backend       *Backend        `json:"backend,omitempty"`
-	Copilot       *Copilot        `json:"copilot,omitempty"`
-	DesktopBridge json.RawMessage `json:"desktopBridge,omitempty"`
+	SchemaVersion      int             `json:"schemaVersion"`
+	Hosting            string          `json:"hosting,omitempty"`
+	MinPlatformVersion string          `json:"minPlatformVersion,omitempty"`
+	ID                 string          `json:"id"`
+	Key                string          `json:"key"`
+	Label              string          `json:"label"`
+	Version            string          `json:"version"`
+	Target             string          `json:"target"`
+	AppConfig          map[string]any  `json:"appConfig"`
+	UserConfig         *UserConfig     `json:"userConfig,omitempty"`
+	Frontend           Frontend        `json:"frontend"`
+	Backend            *Backend        `json:"backend,omitempty"`
+	Copilot            *Copilot        `json:"copilot,omitempty"`
+	DesktopBridge      json.RawMessage `json:"desktopBridge,omitempty"`
 }
 type Frontend struct {
 	Root        string `json:"root"`

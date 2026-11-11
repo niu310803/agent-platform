@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	platform "agent-platform"
 	"agent-platform/internal/accesspolicy"
 	"agent-platform/internal/adminsource"
 	"agent-platform/internal/api"
@@ -34,6 +36,7 @@ import (
 	"agent-platform/internal/kbases"
 	"agent-platform/internal/kbx"
 	"agent-platform/internal/knowledge"
+	"agent-platform/internal/knowledge/libraryinfo"
 	"agent-platform/internal/llm"
 	"agent-platform/internal/lsp"
 	"agent-platform/internal/mailbox"
@@ -114,14 +117,34 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
+	var singleLock *os.File
+	cleanupSingleLock := true
+	if cfg.SingleWebApp() {
+		singleLock, err = webapp.ClaimSingleInstance(filepath.Dir(cfg.Paths.AgentsDir))
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer func() {
+		if cleanupSingleLock && singleLock != nil {
+			singleLock.Close()
+		}
+	}()
 	var webappHostStatus *webapphost.Status
-	if cfg.WebApps.Enabled {
+	if cfg.WebApps.Enabled && (!cfg.SingleWebApp() || hostEnv.GOOS == "linux") {
 		if err := webapphost.ProtectPlatform(); err != nil {
 			return nil, err
 		}
 		status := webapphost.Inspect(rootCtx)
 		webappHostStatus = &status
 		log.Printf("WebApp prerequisites: node=%t supervisor=%t isolation=%t abi=%d", status.NodeReady, status.SupervisorReady, status.IsolationReady, status.LandlockABI)
+	}
+	if cfg.SingleWebApp() {
+		status, err := webapphost.InspectSingle(rootCtx, cfg.WebAppNode)
+		if err != nil {
+			return nil, err
+		}
+		webappHostStatus = &status
 	}
 	if err := httpclient.ConfigureDefault(cfg.HTTPProxy); err != nil {
 		return nil, fmt.Errorf("initialize HTTP clients: %w", err)
@@ -184,10 +207,18 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 		return nil, fmt.Errorf("memory timezone: %w", err)
 	}
 	memoryStore := memory.NewStore(cfg.Paths.MemoryDir, cfg.Paths.OwnerDir, memoryLocation)
-	if err := memoryStore.PrepareSummary(); err != nil {
+	if err := func() error {
+		if cfg.SingleWebApp() {
+			return nil
+		}
+		return memoryStore.PrepareSummary()
+	}(); err != nil {
 		return nil, fmt.Errorf("prepare memory summary: %w", err)
 	}
-	skillCandidateStore, err := skills.NewFileCandidateStore(filepath.Join(cfg.Paths.MemoryDir, "skill-candidates"))
+	var skillCandidateStore skills.CandidateStore
+	if !cfg.SingleWebApp() {
+		skillCandidateStore, err = skills.NewFileCandidateStore(filepath.Join(cfg.Paths.MemoryDir, "skill-candidates"))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -323,23 +354,27 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 		}
 	}()
 	libraryEngine := kbx.NewLibraryEngineWithSource(kbxConfig)
-	kbasesService, err := kbases.New(backgroundCtx, cfg.Paths.KBasesDir, cfg.Paths.RUKBasesDir, libraryEngine, kbases.Options{ChatsDir: cfg.Paths.ChatsDir, StateDir: cfg.Paths.StateDir, RuntimeDir: filepath.Dir(cfg.Paths.KBasesDir), ProtectedPaths: accesspolicy.PlatformProtectedPaths(cfg), References: func(id string) []string {
-		refs := []string{}
-		for _, a := range registry.AdminAgents() {
-			binding := contracts.AnyMapNode(a.Definition["kbaseConfig"])
-			if binding["libraryId"] == id {
-				refs = append(refs, a.Key)
+	var kbasesService *kbases.Service
+	if !cfg.SingleWebApp() {
+		kbasesService, err = kbases.New(backgroundCtx, cfg.Paths.KBasesDir, cfg.Paths.RUKBasesDir, libraryEngine, kbases.Options{ChatsDir: cfg.Paths.ChatsDir, StateDir: cfg.Paths.StateDir, RuntimeDir: filepath.Dir(cfg.Paths.KBasesDir), ProtectedPaths: accesspolicy.PlatformProtectedPaths(cfg), References: func(id string) []string {
+			refs := []string{}
+			for _, a := range registry.AdminAgents() {
+				binding := contracts.AnyMapNode(a.Definition["kbaseConfig"])
+				if binding["libraryId"] == id {
+					refs = append(refs, a.Key)
+				}
 			}
+			sort.Strings(refs)
+			return refs
+		}})
+		if err != nil {
+			return nil, fmt.Errorf("initialize knowledge libraries: %w", err)
 		}
-		sort.Strings(refs)
-		return refs
-	}})
-	if err != nil {
-		return nil, fmt.Errorf("initialize knowledge libraries: %w", err)
-	}
-	knowledgeManager.BindKBases(kbasesService)
-	if err := kbasesService.Start(); err != nil {
-		return nil, err
+		knowledgeManager.BindKBases(kbasesService)
+		if err := kbasesService.Start(); err != nil {
+			return nil, err
+		}
+
 	}
 	cardReporter := gateway.NewAgentCardReporter(backgroundCtx, registry)
 	mcpSyncCoordinator := mcp.NewSyncCoordinator(mcpRegistry, mcpToolSync, mcpGate, 10*time.Second, notifications)
@@ -423,21 +458,27 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 	serverStartedAt := time.Now()
 	adminSourceService := adminsource.NewService()
 	chatResourceService := chatresource.NewService(chatStore)
-	terminalManager := terminal.NewManager()
+	var terminalManager *terminal.Manager
+	if !cfg.SingleWebApp() {
+		terminalManager = terminal.NewManager()
+	}
 	conversationService := conversation.NewService(chatStore, archiveStore, archiver, runManager)
 	conversationService.IsBotAgent = func(key string) bool {
 		def, ok := registry.AgentDefinition(key)
 		return ok && def.Mode == catalog.AgentModeBot
 	}
-	voiceService := voice.NewService(backgroundCtx, voice.Dependencies{Billing: cfg.Billing, Usage: conversationService, Config: cfg.Voice, Models: modelRegistry, Runtime: runtimeService, Chats: chatStore, Agents: registry, Runs: runManager})
+	var voiceService *voice.Service
+	if !cfg.SingleWebApp() {
+		voiceService = voice.NewService(backgroundCtx, voice.Dependencies{Billing: cfg.Billing, Usage: conversationService, Config: cfg.Voice, Models: modelRegistry, Runtime: runtimeService, Chats: chatStore, Agents: registry, Runs: runManager})
+	}
 	cleanupVoice := true
 	defer func() {
-		if cleanupVoice {
+		if cleanupVoice && voiceService != nil {
 			voiceService.Close()
 		}
 	}()
 	var mailService *mailbox.Service
-	{
+	if !cfg.SingleWebApp() {
 		mailStore, err := mailbox.Open(cfg.Paths.ChatsDir)
 		if err != nil {
 			return nil, fmt.Errorf("initialize mailbox: %w", err)
@@ -462,7 +503,13 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 		return nil, fmt.Errorf("register result_submit tool: %w", err)
 	}
 	automationService := &automation.Service{Registry: automationRegistry, Orchestrator: automationOrchestrator, History: automationExecutionHistory, DefaultZoneID: cfg.Automation.DefaultZoneID}
-	controlHandler := platformcontrol.NewToolHandler(cfg, registry, conversationService).ConfigureControl(&adminsource.ControlService{Mutations: adminSourceService, Config: cfg, Registry: registry, Models: modelRegistry, Reload: reloader.Reload, Coordinate: reloader.WithCatalogDirectoryMutation, ValidateLibrary: kbasesService.ValidateBinding, LibraryDefinition: kbasesService.BindingDefinition}, conversationService, modelRegistry).ConfigureAutomation(automationService).ConfigureLibraries(kbasesService)
+	var validateLibrary func(string) error
+	var libraryDefinition func(string) (kbases.Definition, error)
+	if kbasesService != nil {
+		validateLibrary = kbasesService.ValidateBinding
+		libraryDefinition = kbasesService.BindingDefinition
+	}
+	controlHandler := platformcontrol.NewToolHandler(cfg, registry, conversationService).ConfigureControl(&adminsource.ControlService{Mutations: adminSourceService, Config: cfg, Registry: registry, Models: modelRegistry, Reload: reloader.Reload, Coordinate: reloader.WithCatalogDirectoryMutation, ValidateLibrary: validateLibrary, LibraryDefinition: libraryDefinition}, conversationService, modelRegistry).ConfigureAutomation(automationService).ConfigureLibraries(kbasesService)
 	connectorAuth := connectorauth.New(backgroundCtx, cfg.Paths.ConnectorSources(), nil).WithInheritEnv(cfg.Bash.InheritEnv).WithPreparationReload(func(ctx context.Context) error { return reloader.Reload(ctx, "connectors") }).WithSsoIdTokenFile(cfg.SsoIdTokenFile).WithCredentialValidator(mcpClient.ValidateConnectorCredentials)
 	controlHandler.ConfigureConnectors(connectorAuth, mcp.NewConnectorChecker(cfg.Paths.ConnectorSources()))
 	controlHandler.RuntimeSnapshot = func() map[string]any {
@@ -490,15 +537,23 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 		Prompts:               cfg.Prompts,
 	})
 	profiles := runtimeadapter.Profiles{Builder: systemInits, Tools: toolExecutor}
-	sessions := runtimesession.New(runtimesession.Dependencies{KnowledgeLibrary: kbasesService.LibraryOption, ValidateKnowledge: knowledgeManager.ValidateRunLibrary, Config: cfg, Chats: chatStore, Registry: runtimeadapter.Catalog{Registry: registry}, Models: modelRegistry, Runs: runManager, Tools: toolExecutor, Profiles: profiles})
-	memoryClient := memoryworker.Client{Root: cfg.Paths.MemoryDir, Timezone: cfg.Memory.Timezone, ConfigDir: filepath.Join(cfg.Paths.StateDir, "memx")}
-	memoryWorker := memoryworker.New(cfg.Memory, memoryworker.StateRoot(cfg.Paths.MemoryDir), chatStore,
-		memoryClient,
-		&memoryworker.ModelConfigSync{ModelKey: cfg.Memory.Worker.ModelKey, Models: modelRegistry, TimeoutSeconds: cfg.Memory.Worker.TimeoutSeconds, Client: memoryClient},
-		func(key string) (string, bool) {
-			def, ok := registry.AgentDefinition(key)
-			return def.Workspace.ProjectDir(), ok && def.MemoryConfig.Enabled && def.Engine == catalog.AgentEngineNative && def.ProxyConfig == nil && def.Mode != "CHANNEL"
-		}).WithArchives(archiveStore)
+	var libraryOption func(string) (libraryinfo.LibraryOption, error)
+	if kbasesService != nil {
+		libraryOption = kbasesService.LibraryOption
+	}
+	sessions := runtimesession.New(runtimesession.Dependencies{KnowledgeLibrary: libraryOption, ValidateKnowledge: knowledgeManager.ValidateRunLibrary, Config: cfg, Chats: chatStore, Registry: runtimeadapter.Catalog{Registry: registry}, Models: modelRegistry, Runs: runManager, Tools: toolExecutor, Profiles: profiles})
+	var memoryWorker *memoryworker.Worker
+	if !cfg.SingleWebApp() {
+		memoryClient := memoryworker.Client{Root: cfg.Paths.MemoryDir, Timezone: cfg.Memory.Timezone, ConfigDir: filepath.Join(cfg.Paths.StateDir, "memx")}
+		memoryWorker = memoryworker.New(cfg.Memory, memoryworker.StateRoot(cfg.Paths.MemoryDir), chatStore,
+			memoryClient,
+			&memoryworker.ModelConfigSync{ModelKey: cfg.Memory.Worker.ModelKey, Models: modelRegistry, TimeoutSeconds: cfg.Memory.Worker.TimeoutSeconds, Client: memoryClient},
+			func(key string) (string, bool) {
+				def, ok := registry.AgentDefinition(key)
+				return def.Workspace.ProjectDir(), ok && def.MemoryConfig.Enabled && def.Engine == catalog.AgentEngineNative && def.ProxyConfig == nil && def.Mode != "CHANNEL"
+			}).WithArchives(archiveStore)
+
+	}
 	var webapps *webapp.Service
 	var webappRunner *webapphost.Runner
 	var appBridge *webappbridge.Service
@@ -506,7 +561,16 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 	cleanupWebapps := true
 	if cfg.WebApps.Enabled {
 		webappRunner = webapphost.NewRunner(cfg.Paths.WebAppsDir, cfg.WebApps, webappHostStatus != nil && webappHostStatus.BackendPrerequisitesReady)
-		webapps, err = webapp.Open(webapp.Options{Root: cfg.Paths.WebAppsDir, DataRoot: cfg.Paths.WebAppDataDir, Config: cfg.WebApps, Runner: webappRunner})
+		options := webapp.Options{Root: cfg.Paths.WebAppsDir, DataRoot: cfg.Paths.WebAppDataDir, Config: cfg.WebApps, Runner: webappRunner}
+		if cfg.SingleWebApp() {
+			options.Root = filepath.Join(cfg.Paths.StateDir, "webapps")
+			options.SingleRoot = filepath.Dir(cfg.Paths.AgentsDir)
+			options.PlatformVersion = platform.Version()
+			options.InstanceLock = singleLock
+			webappRunner.SetNode(cfg.WebAppNode)
+			webappRunner.SetRoot(options.Root)
+		}
+		webapps, err = webapp.Open(options)
 		if err != nil {
 			return nil, fmt.Errorf("initialize WebApp storage: %w", err)
 		}
@@ -516,8 +580,20 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 			_ = webapps.Close()
 		}
 	}()
+	if cfg.SingleWebApp() {
+		if err := validateSingleCatalog(webapps, registry, cfg); err != nil {
+			return nil, err
+		}
+		if err := prepareSingleOwner(&cfg); err != nil {
+			return nil, err
+		}
+	}
 	if webapps != nil {
-		adapters := webappbridge.NewAdapters(webappbridge.AdapterOptions{Apps: webapps, Runtime: runtimeService, Registry: registry, Chats: chatStore, Artifacts: chatResourceService, Owner: cfg.Auth.AllowedSubjects[0], Root: filepath.Join(cfg.Paths.WebAppsDir, webapp.SDKStateDir)})
+		bridgeRoot := filepath.Join(cfg.Paths.WebAppsDir, webapp.SDKStateDir)
+		if cfg.SingleWebApp() {
+			bridgeRoot = filepath.Join(cfg.Paths.StateDir, "webapps", webapp.SDKStateDir)
+		}
+		adapters := webappbridge.NewAdapters(webappbridge.AdapterOptions{Apps: webapps, Runtime: runtimeService, Registry: registry, Chats: chatStore, Artifacts: chatResourceService, Owner: cfg.Auth.AllowedSubjects[0], Root: bridgeRoot})
 		appBridge = webappbridge.New(webappbridge.Options{RemoteMCP: remoteMCP, Apps: webapps, Owner: cfg.Auth.AllowedSubjects[0], Connectors: &connectorops.Service{Auth: connectorAuth, Sources: cfg.Paths.ConnectorSources()}, Actions: adapters.Actions()})
 		if err := appBridge.ListenInternal(); err != nil {
 			return nil, fmt.Errorf("initialize WebApp bridge: %w", err)
@@ -653,7 +729,7 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 
 	// Gateway Registry 支持多条反向 WS 连接；configs/channels.yml 只在启动时读取。
 	var gwRegistry *gateway.Registry
-	if handler := srv.WSHandler(); handler != nil {
+	if handler := srv.WSHandler(); handler != nil && !cfg.SingleWebApp() {
 		gwRegistry = gateway.New(
 			backgroundCtx,
 			cfg.WebSocket,
@@ -691,14 +767,21 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 			return nil, fmt.Errorf("restore static WebApps: %w", err)
 		}
 	}
-	memoryWorker.Start(backgroundCtx)
+	if memoryWorker != nil {
+		memoryWorker.Start(backgroundCtx)
+	}
 	cleanupBackground = false
 	cleanupMCP = false
 	cleanupNative = false
 	cleanupMail = false
 	cleanupWebapps = false
+	cleanupSingleLock = false
 
 	cleanupVoice = false
+	var automationLifecycle automationStopper
+	if automationOrchestrator != nil {
+		automationLifecycle = automationOrchestrator
+	}
 	return &App{
 		voice: voiceService, webappBridge: appBridge,
 		webapps:                webapps,
@@ -708,7 +791,7 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 		RuntimeEnv:             hostEnv,
 		Router:                 srv,
 		backgroundCancel:       backgroundCancel,
-		automation:             automationOrchestrator,
+		automation:             automationLifecycle,
 		gateways:               gwRegistry,
 		wsHub:                  wsHub,
 		automationExecutions:   automationExecutionHistory,

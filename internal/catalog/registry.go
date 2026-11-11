@@ -317,7 +317,12 @@ type FileRegistry struct {
 }
 
 func NewFileRegistry(cfg config.Config, toolDefs []api.ToolDetailResponse) (*FileRegistry, error) {
-	if err := recoverConnectorDetaches(cfg); err != nil {
+	if err := func() error {
+		if cfg.SingleWebApp() {
+			return nil
+		}
+		return recoverConnectorDetaches(cfg)
+	}(); err != nil {
 		return nil, fmt.Errorf("recover connector detach: %w", err)
 	}
 	for _, mode := range []string{"general", "coder", "kbase", "bot"} {
@@ -330,7 +335,12 @@ func NewFileRegistry(cfg config.Config, toolDefs []api.ToolDetailResponse) (*Fil
 			return nil, fmt.Errorf("generated runtime overlaps Agent or Skill sources")
 		}
 	}
-	if err := cleanupEditableSkillImportStaging(cfg.Paths.SkillsCenterDir); err != nil {
+	if err := func() error {
+		if cfg.SingleWebApp() {
+			return nil
+		}
+		return cleanupEditableSkillImportStaging(cfg.Paths.SkillsCenterDir)
+	}(); err != nil {
 		return nil, fmt.Errorf("cleanup skill import staging: %w", err)
 	}
 	for _, other := range []string{cfg.Paths.AgentsDir, cfg.Paths.SkillsCenterDir, cfg.Paths.ChatsDir, cfg.Paths.MemoryDir, cfg.Paths.KBasesDir, cfg.Paths.RUKBasesDir, cfg.Paths.RegistriesDir, cfg.Paths.ToolsDir, cfg.Paths.OwnerDir, cfg.Paths.RootDir, cfg.Paths.AutomationsDir, cfg.Paths.PanDir} {
@@ -361,7 +371,7 @@ func NewFileRegistry(cfg config.Config, toolDefs []api.ToolDetailResponse) (*Fil
 		runtimeInvalidAgents: map[string]AdminAgentDiagnostic{},
 		skills:               map[string]SkillDefinition{},
 	}
-	if strings.TrimSpace(cfg.Paths.SkillsCenterDir) != "" {
+	if !cfg.SingleWebApp() && strings.TrimSpace(cfg.Paths.SkillsCenterDir) != "" {
 		backups, err := registry.MigrateLegacySkillPackages()
 		for _, backup := range backups {
 			log.Printf("[catalog][skills] migrated legacy skill package; recovery backup=%s", backup)

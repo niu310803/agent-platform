@@ -32,19 +32,20 @@ type Options struct {
 	Actions    map[string]Handler
 }
 type Service struct {
-	remoteMCP    *remotemcp.Service
-	apps         *webapp.Service
-	owner        string
-	connectors   *connectorops.Service
-	actions      map[string]Handler
-	mu           sync.Mutex
-	credentials  *credentials
-	internal     *http.Server
-	closed       bool
-	ctx          context.Context
-	cancel       context.CancelFunc
-	permits      chan struct{}
-	internalHost string
+	remoteMCP      *remotemcp.Service
+	apps           *webapp.Service
+	owner          string
+	connectors     *connectorops.Service
+	actions        map[string]Handler
+	mu             sync.Mutex
+	credentials    *credentials
+	internal       *http.Server
+	closed         bool
+	ctx            context.Context
+	cancel         context.CancelFunc
+	permits        chan struct{}
+	internalHost   string
+	requestTracker func() func()
 }
 
 func New(options Options) *Service {
@@ -54,6 +55,11 @@ func New(options Options) *Service {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{remoteMCP: options.RemoteMCP, ctx: ctx, cancel: cancel, permits: make(chan struct{}, 32), apps: options.Apps, owner: options.Owner, connectors: options.Connectors, actions: actions, credentials: newCredentials()}
+}
+func (s *Service) SetRequestTracker(tracker func() func()) {
+	s.mu.Lock()
+	s.requestTracker = tracker
+	s.mu.Unlock()
 }
 func SDKModule() []byte                      { return module }
 func (s *Service) Module() []byte            { return SDKModule() }
@@ -95,6 +101,12 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request, scope *webap
 	s.serve(w, r, scope, false)
 }
 func (s *Service) serve(w http.ResponseWriter, r *http.Request, scope *webapp.Scope, backend bool) {
+	s.mu.Lock()
+	tracker := s.requestTracker
+	s.mu.Unlock()
+	if tracker != nil {
+		defer tracker()()
+	}
 	select {
 	case s.permits <- struct{}{}:
 		defer func() { <-s.permits }()

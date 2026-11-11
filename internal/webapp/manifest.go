@@ -207,6 +207,31 @@ func ParseManifest(raw []byte) (Manifest, error) {
 	if m.AppConfig == nil {
 		m.AppConfig = map[string]any{}
 	}
+	if m.Hosting == "platform" {
+		if validateBackendEnv(m) != nil {
+			return bad()
+		}
+		if m.MinPlatformVersion == "" || m.Target != "any" || m.Frontend.Root != "frontend" || m.Backend != nil && (m.Backend.Command.Type != "node" || !strings.HasPrefix(m.Backend.Command.Entry, "backend/")) {
+			return bad()
+		}
+		var bridge struct {
+			KanbanRead bool `json:"kanbanRead"`
+		}
+		if len(m.DesktopBridge) > 0 {
+			if json.Unmarshal(m.DesktopBridge, &bridge) != nil || bridge.KanbanRead {
+				return bad()
+			}
+		}
+		if m.UserConfig != nil {
+			for _, field := range m.UserConfig.Fields {
+				if field.Source != "" {
+					return bad()
+				}
+			}
+		}
+	} else if m.Backend != nil && m.Backend.Command.Type == "node" {
+		return bad()
+	}
 	if m.Frontend.RouteConfig.BackendPrefixes == nil {
 		m.Frontend.RouteConfig.BackendPrefixes = []string{}
 	}

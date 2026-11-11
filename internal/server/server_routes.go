@@ -25,6 +25,13 @@ import (
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.bindHostServerShutdown(r.Context())
+	if s.deps.Config.SingleWebApp() && !singleRouteAllowed(r.URL.Path, r.Method) {
+		http.NotFound(w, r)
+		return
+	}
+	if s.deps.Config.SingleWebApp() && r.URL.Path != "/api/webapp/status" && r.URL.Path != "/healthz" && r.URL.Path != "/ws" {
+		defer s.beginSingleRequest()()
+	}
 	if s.deps.Config.WebApps.Enabled && s.handleWebAppHostBoundary(w, r) {
 		return
 	}
@@ -54,6 +61,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.deps.Config.Logging.Request.Enabled {
 		log.Printf("%s %s (arrived)", r.Method, observability.SanitizeLog(r.URL.RequestURI()))
+	}
+	if s.deps.Config.SingleWebApp() && r.URL.Path == "/api/webapp/status" {
+		s.handleSingleStatus(w, r)
+		return
 	}
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	s.router.ServeHTTP(rec, r)

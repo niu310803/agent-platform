@@ -181,6 +181,7 @@ type Server struct {
 	documentPreview   *documentpreview.Service
 	router            *http.ServeMux
 	deps              Dependencies
+	singleActivity    singleActivity
 	authVerifier      *JWTVerifier
 	ticketService     *ResourceTicketService
 	wsHandler         *ws.Handler
@@ -238,7 +239,7 @@ func New(deps Dependencies) (*Server, error) {
 	if deps.ChatResources == nil {
 		deps.ChatResources = chatresource.NewService(deps.Chats)
 	}
-	if deps.Terminals == nil {
+	if deps.Terminals == nil && !deps.Config.SingleWebApp() {
 		deps.Terminals = terminalpkg.NewManager()
 	}
 	if deps.Conversation == nil {
@@ -302,7 +303,11 @@ func New(deps Dependencies) (*Server, error) {
 	s.skillOrder = catalogorder.NewFileOrderStore(deps.Config.Paths.SkillsCenterDir)
 	if deps.Config.WebApps.Enabled && deps.WebApps != nil {
 		s.webAppGateway = webappgateway.New(deps.WebApps, deps.Config.WebApps)
+		if tracker, ok := deps.WebAppActions.(interface{ SetRequestTracker(func() func()) }); ok {
+			tracker.SetRequestTracker(s.beginSingleRequest)
+		}
 		s.webAppGateway.Actions = deps.WebAppActions
+		s.webAppGateway.OnRequest = s.beginSingleRequest
 		s.webAppGateway.PlatformAuthorization = func(value string) bool {
 			if !strings.HasPrefix(value, "Bearer ") {
 				return false

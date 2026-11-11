@@ -1,5 +1,7 @@
 # WebApp 托管
 
+本文记录 Compose 多应用托管。2026-11-11 新增独立 single 模式，使用相同 Runtime 与 SDK，详见 [WebApp 独立实例](WebApp独立实例.md)；本文的 Linux/Compose 限制不适用于 single。supervisor 当前协议为 v4（新增 `--run-single` 按项 Landlock 授权），下方 v2/v3 为历史验证。
+
 ## 访问范围修订（2026-11-01）
 
 用户确认先完成 `127.0.0.1` 本地端口访问，后续每应用独立域名另行实施。DNS/TLS/nginx 和公网内容域验收延期，剩余工作见 [WebApp 托管剩余工作](../plans/webapp-node-hosting.md)。当前新增网关仅提供每应用一个本地 origin，不在 Platform 主端口提供域名分流。

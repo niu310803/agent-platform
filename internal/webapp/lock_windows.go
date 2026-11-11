@@ -2,10 +2,20 @@
 
 package webapp
 
-import "os"
+import (
+	"golang.org/x/sys/windows"
+	"os"
+)
 
-// WebApp hosting is Linux Compose only; fail closed outside that deployment.
-func acquireInstance(f *os.File) error { return fail("webapp_host_platform_unsupported", 503) }
+func acquireInstance(f *os.File) error {
+	return windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &windows.Overlapped{})
+}
 func availableBytes(path string) (uint64, error) {
-	return 0, fail("webapp_host_platform_unsupported", 503)
+	p, e := windows.UTF16PtrFromString(path)
+	if e != nil {
+		return 0, e
+	}
+	var free uint64
+	e = windows.GetDiskFreeSpaceEx(p, &free, nil, nil)
+	return free, e
 }

@@ -207,6 +207,16 @@ func (s *Service) SaveUserConfig(id string, request UserConfigRequest) (Configur
 	return s.Configuration(id)
 }
 func (s *Service) SavePolicy(id string, request PolicyRequest) (Configuration, error) {
+	if s.singleRoot != "" {
+		s.mu.Lock()
+		old := s.policies[id]
+		s.mu.Unlock()
+		before, _ := json.Marshal([]any{old.AgentKey, old.Skills, old.Connectors, old.Assistant, old.Artifacts})
+		after, _ := json.Marshal([]any{request.AgentKey, request.Skills, request.Connectors, request.Assistant, request.Artifacts})
+		if string(before) != string(after) {
+			return Configuration{}, fail("webapp_package_policy_readonly", 403)
+		}
+	}
 	if !idPattern.MatchString(id) {
 		return Configuration{}, fail("webapp_not_found", 404)
 	}

@@ -25,6 +25,7 @@ type Actions interface {
 
 type Gateway struct {
 	Actions               Actions
+	OnRequest             func() func()
 	PlatformAuthorization func(string) bool
 	service               *webapp.Service
 	config                config.WebAppsConfig
@@ -42,6 +43,9 @@ type Launch struct {
 func New(service *webapp.Service, cfg config.WebAppsConfig) *Gateway {
 	return &Gateway{service: service, config: cfg, auth: newAuthorization(), listeners: map[string]*localListener{}}
 }
+
+func (g *Gateway) SetPlatformOrigin(origin string) { g.config.PlatformOrigin = origin }
+func (g *Gateway) Prepare(id string) error         { return g.ensureListener(id) }
 
 // Local ports are distinct origins. Host never selects an app on Platform's mux.
 func (g *Gateway) HostID(host string) string {
@@ -107,6 +111,9 @@ func jsonResult(w http.ResponseWriter, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if g.OnRequest != nil {
+		defer g.OnRequest()()
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")

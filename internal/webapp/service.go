@@ -18,10 +18,13 @@ import (
 const SDKStateDir = ".sdk"
 
 type Options struct {
-	Root     string
-	DataRoot string
-	Config   config.WebAppsConfig
-	Runner   Runner
+	Root            string
+	DataRoot        string
+	Config          config.WebAppsConfig
+	Runner          Runner
+	SingleRoot      string
+	PlatformVersion string
+	InstanceLock    *os.File
 }
 type Service struct {
 	mu sync.Mutex
@@ -30,6 +33,7 @@ type Service struct {
 	packageMu               sync.Mutex
 	closeMu                 sync.Mutex
 	root, dataRoot          string
+	singleRoot              string
 	config                  config.WebAppsConfig
 	maxArchive, maxExpanded int64
 	maxFiles                int
@@ -63,6 +67,9 @@ func Open(options Options) (*Service, error) {
 	s.maxArchive = int64(options.Config.MaxArchiveMiB) << 20
 	s.maxExpanded = int64(options.Config.MaxExtractedMiB) << 20
 	s.maxFiles = options.Config.MaxFiles
+	if options.SingleRoot != "" {
+		return s.openSingle(options)
+	}
 	if s.maxArchive <= 0 || s.maxExpanded < s.maxArchive || s.maxFiles < 1 {
 		return nil, fmt.Errorf("invalid WebApp limits")
 	}
