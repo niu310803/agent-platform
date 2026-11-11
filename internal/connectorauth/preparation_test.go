@@ -98,6 +98,47 @@ func TestPreparationRawInitAndBundledPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+func TestPreparationVersionCheckUsesConnectorBinDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX process integration")
+	}
+	root := filepath.Join(t.TempDir(), "connector packages")
+	t.Setenv("CONNECTOR_BIN_DIR", t.TempDir())
+	m := New(t.Context(), connector.Sources{ExternalRoot: root}, nil).
+		WithInheritEnv([]string{"PATH", "CONNECTOR_BIN_DIR"})
+
+	for _, id := range []string{"first", "second"} {
+		t.Run(id, func(t *testing.T) {
+			cli := simpleCLI()
+			cli["versionCheck"].(map[string]any)["command"] = osCommands(`"$CONNECTOR_BIN_DIR/` + id + `" --version`)
+			pkg := writeCLIPackage(t, root, id, cli)
+			bin := filepath.Join(pkg.Dir, "bin")
+			if err := os.Mkdir(bin, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(bin, id), []byte("#!/bin/sh\necho 1.2.0\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if state, err := m.Prepare(t.Context(), id); err != nil || state.Status != "ready" {
+				t.Fatalf("prepare: %+v %v", state, err)
+			}
+		})
+	}
+
+	t.Run("managed", func(t *testing.T) {
+		cli := simpleCLI()
+		cli["versionCheck"].(map[string]any)["command"] = osCommands(`"$CONNECTOR_BIN_DIR/demo" --version`)
+		cli["init"] = osCommands(`test "$CONNECTOR_BIN_DIR" != "$npm_config_prefix/bin" &&
+mkdir -p "$npm_config_prefix/bin" &&
+printf '#!/bin/sh\necho 1.2.0\n' > "$npm_config_prefix/bin/demo" &&
+chmod +x "$npm_config_prefix/bin/demo"`)
+		pkg := writeCLIPackage(t, root, "managed", cli)
+		if state, err := m.Prepare(t.Context(), pkg.ID); err != nil || state.Status != "ready" {
+			t.Fatalf("prepare: %+v %v", state, err)
+		}
+	})
+}
+
 func TestPreparationCancellationConflictRecoveryAndRetry(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX process integration")

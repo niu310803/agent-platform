@@ -443,7 +443,8 @@ func (m *Manager) prepareCLI(ctx context.Context, pkg connector.Package, fingerp
 	}
 	// The new installation is searched first; the active one stays in use
 	// until this preparation succeeds.
-	env, err := m.cliEnvironmentWith(pkg, connector.InstallBin(prefix))
+	installBin := connector.InstallBin(prefix)
+	env, err := m.cliEnvironmentWith(pkg, installBin)
 	if err != nil {
 		return "", release, err
 	}
@@ -501,6 +502,13 @@ func (m *Manager) prepareCLI(ctx context.Context, pkg connector.Package, fingerp
 	line, err := cliLine(config["command"], false)
 	if err != nil {
 		return "", release, err
+	}
+	binDir := pkg.BinDir
+	if binDir == "" {
+		binDir = installBin
+	}
+	if binDir != "" {
+		env = hostenv.Set(env, "CONNECTOR_BIN_DIR", binDir)
 	}
 	versionCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
