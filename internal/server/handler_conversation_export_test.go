@@ -99,6 +99,110 @@ func TestHandleChatExportSnapshotReturnsJSONDocument(t *testing.T) {
 	}
 }
 
+func TestFailedConversationExportUsesRequestedLocaleAndPreservesUserData(t *testing.T) {
+	fixture := newTestFixture(t)
+	const chatID = "export-failed-approval"
+	if _, _, err := fixture.chats.EnsureChat(chatID, "cutej", "失败对话"); err != nil {
+		t.Fatal(err)
+	}
+	startServerFixtureRun(t, fixture.chats, chatID, "mwamyq0i", 1_794_311_878_215)
+	raw, err := os.ReadFile("../conversationexport/testdata/failed-approval.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.cfg.Paths.ChatsDir, chatID+".jsonl"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.chats.AppendSubmitLine(chatID, chat.SubmitLine{
+		Type: "submit", ChatID: chatID, RunID: "mwamyq0i", UpdatedAt: 1_794_360_003_360,
+		Answer: map[string]any{"type": "awaiting.answer", "runId": "mwamyq0i", "awaitingId": "saved-form", "mode": "form", "status": "answered", "timestamp": int64(1_794_360_003_360),
+			"form": map[string]any{"decision": "approve", "data": map[string]any{"message": "chat not found", "code": "run_timeout"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, locale := range []string{"zh-CN", "en-US"} {
+		for _, format := range []string{"snapshot", "markdown"} {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/chat/export?chatId="+chatID+"&format="+format, nil)
+			req.Header.Set("X-Locale", locale)
+			fixture.server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s %s: %d %s", locale, format, rec.Code, rec.Body.String())
+			}
+			wantError := "运行超时"
+			if locale == "en-US" {
+				wantError = "The run timed out."
+			}
+			if !strings.Contains(rec.Body.String(), wantError) {
+				t.Fatal(rec.Body.String())
+			}
+			if format == "snapshot" {
+				var snapshot conversationexport.SnapshotV1
+				if err := json.Unmarshal(rec.Body.Bytes(), &snapshot); err != nil {
+					t.Fatal(err)
+				}
+				if snapshot.Locale != locale {
+					t.Fatalf("locale=%s", snapshot.Locale)
+				}
+				turn := snapshot.Turns[0]
+				var answers []conversationexport.NodeV1
+				for _, node := range turn.Nodes {
+					if node.Kind == "awaiting-answer" {
+						answers = append(answers, node)
+					}
+				}
+				if turn.Outcome != conversationexport.OutcomeFailed || turn.Error == nil || turn.Error.Code != "run_timeout" || len(answers) != 4 {
+					t.Fatalf("failed history projection: %+v", turn)
+				}
+				for i, status := range []string{"error", "answered", "error", "answered"} {
+					var answer map[string]any
+					if err := json.Unmarshal([]byte(answers[i].Text), &answer); err != nil {
+						t.Fatal(err)
+					}
+					if answer["status"] != status || (i > 0 && answers[i].At < answers[i-1].At) {
+						t.Fatalf("answer: %+v", answers[i])
+					}
+				}
+				for _, text := range []string{"像素扫描博华广场单选框区域", "python3 pngprobe.py", "approve_rule_run"} {
+					if !strings.Contains(answers[1].Text, text) {
+						t.Fatalf("missing %s", text)
+					}
+				}
+				last := snapshot.Turns[0].Nodes[len(snapshot.Turns[0].Nodes)-1]
+				if !strings.Contains(last.Text, "chat not found") {
+					t.Fatalf("user text was translated: %s", last.Text)
+				}
+			} else if strings.Contains(rec.Body.String(), "approve_rule_run") || strings.Contains(rec.Body.String(), "chat not found") {
+				t.Fatal("Markdown must exclude interaction details")
+			}
+		}
+	}
+}
+
+func TestConversationExportBusinessErrorsAreLocalized(t *testing.T) {
+	fixture := newTestFixture(t)
+	const chatID = "empty-export"
+	if _, _, err := fixture.chats.EnsureChat(chatID, "mock-agent", "empty"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixture.cfg.Paths.ChatsDir, chatID+".jsonl"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, locale := range []string{"zh-CN", "en-US"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/chat/export?chatId="+chatID+"&format=markdown", nil)
+		req.Header.Set("X-Locale", locale)
+		fixture.server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		english := strings.Contains(rec.Body.String(), "conversation has no exportable root turn")
+		if english != (locale == "en-US") {
+			t.Fatalf("locale=%s body=%s", locale, rec.Body.String())
+		}
+	}
+}
+
 func TestHandleChatExportMapsManifestWithoutReadingArtifactFile(t *testing.T) {
 	fixture := newTestFixture(t)
 	const chatID = "chat-snapshot-manifest"

@@ -117,6 +117,8 @@ Desktop 对这些动作仅在可信内部 agentPlatform 调用上下文下豁免
 
 全部操作通过 conversation 服务和原 Chat 存储实现。匿名只能访问当前 Chat；query:subject 的 Chat 验证所有者；历史读取不依赖 Agent 当前有效性。read/search 和 Markdown 导出只包含用户与助手可见正文。snapshot 导出复用现有 Snapshot V1 完整时间线，包括思考、工具及已发布产物元数据；不是原始存储备份，不新增导出系统提示词或私有状态。
 
+Snapshot V1 同时从历史 `awaiting.ask`／`awaiting.answer` 投影只读交互结果，复用 `awaiting-answer` 节点的 `text` envelope，并按 `runId + awaitingId` 去重；密码回答掩码，用户原文不翻译。`run.error` 生成可选 `turn.error: { code, message }`，只包含本地化公开错误，不包含诊断堆栈。Markdown 允许失败、取消和进行中轮次，保留已有可见正文并补状态、错误或无回答兜底，交互明细仅进入快照。HTTP 导出使用 `X-Locale` 冻结 `snapshot.locale`，不修改历史 JSONL。
+
 list/search 按 Chat ID 的稳定顺序使用存储层 keyset 分页，游标不再包含全部 ID，使用进程内随机密钥认证加密以隐藏扫描到的其他用户 ID，重启后需重新查询；不跟随 UI 的置顶/手工排序。单页至多扫描 100 个列表候选，权限过滤后可能为空但仍有 nextCursor。search 每次至多扫描 50 个会话、16 MiB 历史，在会话之间检查 2 秒期限；超过 8 MiB 的单会话显式列在 skippedChatIds，返回 incomplete，不能宣称无结果。命中片段至多 500 Unicode 字符，并围绕命中位置。read 使用 continuation cursor；read 在 16,000 字符预算内切分长消息，返回 offset/continued，冻结已读消息边界的内容摘要，历史被改动后要求重新开始。artifacts 复用已认证 Chat 资源接口。归档列表分页覆盖全部记录。
 
 rename/setPinned 可以操作当前 Chat，置顶复用现有服务与 chats.order.changed。archive/delete/fork 拒绝当前调用 Chat、活动 Run 和 pending HITL。删除审批同时绑定摘要和历史内容版本。fork/export 使用 Run/tool ID 派生结果路径和进程内收据（不落盘；旧的 `<StateDir>/conversation-control/` 可手动删除），同一次调用不会产生多个副本，参数变更冲突。export 输出当前 Chat 下的正文 Markdown 或标准完整 snapshot JSON。未完成的 fork 收据无法证明已存在目标来源时返回 idempotency_conflict，不认领现有目标、不覆盖或删除。HTTP 与工具的归档、恢复、置顶、删除、改名、复制共用修改锁；Service 依赖视图显式共享锁，不复制 sync.Mutex。

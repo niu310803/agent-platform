@@ -2,11 +2,16 @@ package i18n
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"strings"
 )
 
 var zhCNMessages = map[string]string{
+	"conversation has no exportable root turn":                                             "当前会话没有可导出的用户问题",
+	"conversation timeline is invalid":                                                     "对话记录格式无效，无法导出",
+	"conversation export exceeds size limit":                                               "对话内容超过导出大小限制",
+	"conversation export failed":                                                           "对话导出失败，请稍后重试",
 	"selected connectors are mutually exclusive; deselect the conflicting connector first": "所选连接器互斥，请先取消已选择的冲突连接器",
 	"accessLevel must be default, ask_for_approval, auto_approve, or full_access":          "accessLevel 必须是 default、ask_for_approval、auto_approve 或 full_access",
 	"agent not found":                                     "智能体不存在",
@@ -65,6 +70,8 @@ var zhCNMessages = map[string]string{
 }
 
 var zhCNCodes = map[string]string{
+	"invalid_submit":                          "提交失败。",
+	"awaiting_error":                          "交互失败。",
 	"active_run_conflict":                     "当前会话存在活跃运行冲突",
 	"agent_forbidden":                         "当前渠道不允许使用该智能体",
 	"agent_configuration_invalid":             "智能体配置无效，请在智能体管理中修复配置后再发送。",
@@ -256,6 +263,21 @@ func LocaleFromAcceptLanguage(header string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// ErrorMessage uses public codes only; raw diagnostics never become display text.
+func ErrorMessage(locale, code string) string {
+	defaults := map[string]string{
+		"run_timeout":            "The run timed out.",
+		"timeout":                "Timed out waiting for a response.",
+		"user_dismissed":         "The interaction was cancelled.",
+		"invalid_submit":         "The response could not be submitted.",
+		"awaiting_error":         "The interaction failed.",
+		"provider_stream_failed": "The model service stream failed.",
+		"provider_timeout":       "The model service timed out.",
+		"tool_calls_exceeded":    "The tool call limit was reached.",
+	}
+	return Translate(locale, code, cmp.Or(defaults[code], Translate(locale, "run_error", "The run failed.")))
 }
 
 func Translate(locale string, code string, message string) string {

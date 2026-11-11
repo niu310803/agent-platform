@@ -235,9 +235,9 @@ func TestBuildSnapshotEnforcesTwoThousandItemLimit(t *testing.T) {
 	}
 }
 
-func TestRenderMarkdownKeepsOnlyCompletedFinalAnswers(t *testing.T) {
+func TestRenderMarkdownKeepsFinalAnswersAndUnfinishedTurns(t *testing.T) {
 	ended := testEpoch + 500
-	markdown, err := RenderMarkdown(SnapshotV1{Turns: []TurnV1{
+	markdown, err := RenderMarkdown(SnapshotV1{Locale: "zh-CN", Turns: []TurnV1{
 		{Outcome: OutcomeCompleted, EndedAt: &ended, Nodes: []NodeV1{
 			{Kind: "message", Role: "user", Text: "question **one**", At: testEpoch + 100},
 			{Kind: "thinking", Role: "assistant", Text: "secret", At: testEpoch + 200},
@@ -249,7 +249,7 @@ func TestRenderMarkdownKeepsOnlyCompletedFinalAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render markdown: %v", err)
 	}
-	want := "## 用户问题\n\nquestion **one**\n\n## 助手回答\n\nfinal ✅\n"
+	want := "## 用户问题\n\nquestion **one**\n\n## 助手回答\n\nfinal ✅\n\n---\n\n## 用户问题\n\nrunning\n\n## 助手回答\n\n> 导出时运行尚未完成。\n\n未生成回答正文。\n"
 	if string(markdown) != want {
 		t.Fatalf("markdown mismatch\nwant=%q\n got=%q", want, markdown)
 	}

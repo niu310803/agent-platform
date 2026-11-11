@@ -83,6 +83,11 @@ func (s *Server) loadConversationSnapshot(ctx context.Context, chatID string, in
 	}
 	s.enrichToolMetadata(detail.Events, summaryAgentKey(summary))
 	for index := range detail.Events {
+		// Submitted form data and question text are user content. Their error
+		// envelopes are localized by the export projector, not recursively.
+		if detail.Events[index].Type == "awaiting.ask" || detail.Events[index].Type == "awaiting.answer" {
+			continue
+		}
 		detail.Events[index] = localizeStreamEventData(locale, detail.Events[index])
 	}
 	var files *chatresource.Export
@@ -154,13 +159,14 @@ func writeConversationExportError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, chat.ErrChatNotFound):
 		writeJSON(w, http.StatusNotFound, api.Failure(http.StatusNotFound, "chat not found"))
-	case errors.Is(err, conversationexport.ErrNoRootTurn), errors.Is(err, conversationexport.ErrNoCompletedTurn), errors.Is(err, conversationexport.ErrInvalidTimeline):
+	case errors.Is(err, conversationexport.ErrNoRootTurn), errors.Is(err, conversationexport.ErrInvalidTimeline):
 		writeJSON(w, http.StatusUnprocessableEntity, api.Failure(http.StatusUnprocessableEntity, err.Error()))
 	case errors.Is(err, conversationexport.ErrTooLarge):
-		writeJSON(w, http.StatusRequestEntityTooLarge, api.Failure(http.StatusRequestEntityTooLarge, err.Error()))
+		writeJSON(w, http.StatusRequestEntityTooLarge, api.Failure(http.StatusRequestEntityTooLarge, conversationexport.ErrTooLarge.Error()))
 	case isTimeContractViolation(err):
 		writeTimeContractViolation(w, err)
 	default:
-		writeJSON(w, http.StatusInternalServerError, api.Failure(http.StatusInternalServerError, err.Error()))
+		log.Printf("[chat] conversation export failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, api.Failure(http.StatusInternalServerError, "conversation export failed"))
 	}
 }
