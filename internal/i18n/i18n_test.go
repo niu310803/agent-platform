@@ -93,3 +93,14 @@ func TestLocalizeEventPayloadKeepsOriginal(t *testing.T) {
 		t.Fatalf("expected original payload to remain untouched, got %#v", original)
 	}
 }
+
+func TestErrorMessageUsesPublicCodes(t *testing.T) {
+	for code, english := range map[string]string{"provider_stream_failed": "The model service stream failed.", "provider_timeout": "The model service timed out.", "tool_calls_exceeded": "The tool call limit was reached.", "unknown": "The run failed."} {
+		if got := ErrorMessage(LocaleEN, code); got != english {
+			t.Fatalf("%s: %s", code, got)
+		}
+		if got := ErrorMessage(LocaleZhCN, code); got == "" || got == english {
+			t.Fatalf("%s: %s", code, got)
+		}
+	}
+}

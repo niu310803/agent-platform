@@ -24,7 +24,6 @@ const (
 
 var (
 	ErrNoRootTurn      = errors.New("conversation has no exportable root turn")
-	ErrNoCompletedTurn = errors.New("conversation has no completed question and answer")
 	ErrTooLarge        = errors.New("conversation export exceeds size limit")
 	ErrInvalidTimeline = errors.New("conversation timeline is invalid")
 )
@@ -82,9 +81,16 @@ type TurnV1 struct {
 	StartedAt int64        `json:"startedAt"`
 	EndedAt   *int64       `json:"endedAt,omitempty"`
 	Outcome   Outcome      `json:"outcome"`
+	Error     *ErrorV1     `json:"error,omitempty"`
 	Assistant *AssistantV1 `json:"assistant,omitempty"`
 	Nodes     []NodeV1     `json:"nodes"`
 	Tasks     []TaskV1     `json:"tasks,omitempty"`
+}
+
+// ErrorV1 is public presentation data, never an internal diagnostic payload.
+type ErrorV1 struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 type NodeV1 struct {
@@ -248,17 +254,17 @@ func projectSnapshot(summary *chat.Summary, events []stream.EventData, capturedA
 	if capturedAt < summary.CreatedAt {
 		return SnapshotV1{}, ErrInvalidTimeline
 	}
-	title := strings.TrimSpace(summary.ChatName)
-	if title == "" {
-		title = "Chat"
-	}
-	if len(title) > MaxTitleBytes {
-		return SnapshotV1{}, ErrTooLarge
-	}
 	if i18n.ResolveLocale(i18n.LocaleZhCN, locale) == i18n.LocaleEN {
 		locale = "en-US"
 	} else {
 		locale = i18n.LocaleZhCN
+	}
+	title := strings.TrimSpace(summary.ChatName)
+	if title == "" {
+		title = i18n.ConversationExportText(locale, "title")
+	}
+	if len(title) > MaxTitleBytes {
+		return SnapshotV1{}, ErrTooLarge
 	}
 	snapshot := SnapshotV1{Version: SnapshotVersion, Title: title, Locale: locale, CreatedAt: summary.CreatedAt, CapturedAt: capturedAt, Turns: []TurnV1{}, Attachments: []AttachmentV1{}}
 	turnByRun := map[string]int{}
@@ -267,6 +273,8 @@ func projectSnapshot(summary *chat.Summary, events []stream.EventData, capturedA
 	nodePosition := map[string]int{}
 	taskStartedAt := map[string]int64{}
 	pendingTurn := -1
+	awaitingDefinitions := map[string]stream.EventData{}
+	answerPositions := map[string]int{}
 	for ordinal, event := range events {
 		if err := timecontract.ValidateEpochMillis(event.Timestamp, "timestamp", "conversation.snapshot.events"); err != nil {
 			return SnapshotV1{}, err
@@ -315,12 +323,45 @@ func projectSnapshot(summary *chat.Summary, events []stream.EventData, capturedA
 		if runID == "" && event.Type == "tool.result" {
 			runID = toolByID[event.String("toolId")]
 		}
+		if event.Type == "awaiting.ask" {
+			awaitingDefinitions[runID+"\x00"+event.String("awaitingId")] = event
+			continue
+		}
 		turnIndex, found := turnByRun[runID]
 		if !found {
 			continue
 		}
 		turn := &snapshot.Turns[turnIndex]
 		taskID := strings.TrimSpace(event.String("taskId"))
+		if event.Type == "awaiting.answer" && event.String("mode") != "wait" {
+			awaitingID := strings.TrimSpace(event.String("awaitingId"))
+			if awaitingID == "" {
+				continue
+			}
+			key := runID + "\x00" + awaitingID
+			definition := awaitingDefinitions[key]
+			if taskID == "" {
+				taskID = strings.TrimSpace(definition.String("taskId"))
+			}
+			text, err := projectAwaitingAnswer(event, definition, locale)
+			if err != nil {
+				return SnapshotV1{}, err
+			}
+			if text == "" {
+				continue
+			}
+			node := NodeV1{ID: "awaiting_answer_" + runID + "_" + awaitingID, Kind: "awaiting-answer", Role: "user", Text: text, At: event.Timestamp, RunID: runID, TaskID: taskID}
+			if position, exists := answerPositions[key]; exists {
+				turn.Nodes[position] = node
+			} else {
+				answerPositions[key] = len(turn.Nodes)
+				turn.Nodes = append(turn.Nodes, node)
+			}
+			if len(turn.Nodes) > MaxItems {
+				return SnapshotV1{}, ErrTooLarge
+			}
+			continue
+		}
 		if event.Type == "run.start" {
 			turn.StartedAt = event.Timestamp
 			if resolveAssistant != nil {
@@ -336,6 +377,7 @@ func projectSnapshot(summary *chat.Summary, events []stream.EventData, capturedA
 				turn.Outcome = OutcomeCompleted
 			case "run.error":
 				turn.Outcome = OutcomeFailed
+				turn.Error = projectError(event.Value("error"), locale, "run_error")
 			default:
 				turn.Outcome = OutcomeCancelled
 			}
