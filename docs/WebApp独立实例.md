@@ -2,6 +2,24 @@
 
 `--webapp-host=single` 是 standalone 的单应用装配档位，支持纯前端及宿主提供的 Node 24 后端。Desktop 安装、升级和卸载包，Platform 读取 `AP_RUNTIME_DIR/webapp.json`，不提供单应用安装命令。Compose 多应用托管保持独立。
 
+## 离线检查与打包
+
+应用工程统一使用 Platform CLI，不维护自己的 ZIP 或清单校验实现。在应用根目录执行：
+
+```sh
+agent-platform webapp check
+agent-platform webapp pack
+agent-platform webapp check --source dist/my-app-1.0.0.zip
+```
+
+`--source` 默认为当前目录；`check` 支持源码目录或 ZIP，`pack` 只接受目录，默认输出 `<source>/dist/<key>-<version>.zip`，可用 `--output /path/app.zip` 指定。成功输出 JSON 摘要；失败退出非零。命令不初始化 Runtime、不加载实例配置、不启动应用或模型，也不要求 Node。
+
+此合同用于 `hosting=platform` 的独立应用。包根直接使用 `backend/`、`frontend/`、`platform/`、`webapp.json`、`AGENTS.md`，没有应用名包装层；必须有清单和前端入口，其他条目按源码实际存在情况收集。`platform/` 接受 agents、skills-center、connectors-center、registries、configs。工程工具、测试和运行数据位于应用根的其他目录，不进入包；原 Compose 多应用上传格式保持不变。
+
+检查复用 `ParseManifest` 的完整共享合同，并校验声明的前端、回退页面与后端入口、目录结构、链接、特殊文件、大小写冲突及文件/目录冲突。源目录排除 `.git`、`node_modules`、`__pycache__`、`.DS_Store`、`.env*`、`*.pem`、`*.local.yml/yaml`；成品 ZIP 包含这些路径时拒绝。包最多 10,000 个条目、展开内容最多 128 MiB，待检查 ZIP 本身也不超过 128 MiB。此检查不代替 Agent/Connector 运行验证、真实模型验收或应用业务测试；凭据模板的内容仍由发布方审阅。
+
+打包原样保留清单、资源路径和可执行位，不删改后端声明或应用配置；相同输入可重复生成相同 ZIP。输出先写临时文件，完成并确认成品 ZIP 不超过 128 MiB 后替换；即使展开内容未超限，ZIP 开销导致成品超限时也会失败并保留旧输出。不允许覆盖选中的源码目录。需要目录输入的宿主可将 ZIP 解压到独立目录，再按其安装合同映射 `platform/` 资源；检查和打包不负责安装或修改运行数据。
+
 ## 启动和版本
 
 ```sh
@@ -78,5 +96,7 @@ python3 scripts/test-webapp-single.py --platform /absolute/agent-platform --node
 ```
 
 验收脚本仅创建临时实例和本机 mock 模型，测试 Node 权限、ticket/页面、SDK 包内 Agent/Skill 对话、共享模型配置不变、Platform 强杀后的回收与重启、父进程死亡与回收，不访问真实模型或生产数据。日志和实例留在打印出的临时目录供复查。
+
+2026-11-12：离线 `webapp check/pack` 的 WebApp 域与 CLI 回归通过；macOS arm64、Linux amd64、Windows amd64 入口构建通过。Linux CLI 挂载进无网络、只读输入的容器完成检查与打包，与 macOS 生成 ZIP 字节一致。新 ZIP 经既有基础镜像完成临时实例登录、包内 Skill/Agent、显式规则模型回复和 Chat 落盘验证（mwd6xiw7）；该验证不代表真实模型或 Windows 实机验收，既有用户实例与运行镜像未更换。
 
 2026-11-11：macOS arm64 开发态 Electron Node 24 已完成真实启动、按项拒绝、owner ticket、页面访问、包内 Agent/Skill 的 mock 模型 SDK 对话、Platform 强杀后的回收重启、父进程退出、共享 registries 不变验证；Windows amd64 与 Linux amd64 的 Go 入口交叉构建通过，supervisor 经 Linux GCC `-Wall -Wextra -Werror -static` 编译通过。Docker Desktop amd64 仿真返回协议 v4、abi 0、errno 38，按预期拒绝降级。Windows 实机、打包后的 Mac，以及原生 Linux amd64 的新版 Landlock、生命周期验收仍需目标环境执行，不能沿用旧版 Compose 验收作为本次通过证据。

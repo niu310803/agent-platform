@@ -162,6 +162,7 @@ KBX 索引固定使用 `ru-kbases/<libraryId>/index.sqlite` 及配套存储；Ag
 - `kbase_search` 支持 query/search/vsearch/gsearch，复合过滤与 Agent 范围取交集；纯全文不解析模型配置，严格向量/图检索不静默回退。图关系和边证据保留并检查来源范围；Platform 尚不自动建图，共享库绑定已接入，重排和查询扩展通过库 models.reranker/queryExpansion 接入；reranker 引用 registry type: reranker（必填 reranker.endpointPath），扩展引用 OPENAI Chat Completions。参数和验证边界见 [KBX 接入](docs/KBX接入.md)。
 - editingMode 是四种 Native Agent 的通用 Workspace 编辑开关；mode 只能提供模板默认值，显式 true/false 不按 mode 限制。省略时 KBASE 默认 false，GENERAL/CODER/TEAM 默认 true，规划 Run 始终只读。Workspace 始终是最终 canonical runtimeConfig.workspaceRoot，当前 Chat 目录独立；library.collections[].editable 与 collection Run 授权链路已删除，旧字段在 YAML/API 输入拒绝。来源目录的文件/Bash 权限统一由 Workspace、hostAccess 与 AccessPolicy/HITL 决定，绑定/选库不增加读写根，容器挂载须显式配置。KBASE 专属的结构化文件附加保护已删除，文件工具对四种 mode 行为一致，先读后写只跟随 file-tools 全局配置。
 - 测试以 `make test` / `go test ./...` 为主，协议变更优先覆盖 `internal/server`、`internal/stream`、`internal/llm`、`internal/tools`。
+- 独立 WebApp 的离线检查与 ZIP 打包由 `agent-platform webapp check/pack` 统一提供，复用 `internal/webapp.ParseManifest`；应用工程不维护重复实现。工具不初始化实例、不改写清单或运行数据；分发目录合同见 [WebApp 独立实例](docs/WebApp独立实例.md#离线检查与打包)。
 
 ## 8. 开发流程
 

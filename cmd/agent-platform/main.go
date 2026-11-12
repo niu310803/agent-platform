@@ -37,6 +37,13 @@ func main() {
 		fmt.Println(platform.Version())
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "webapp" {
+		if err := runWebAppCommand(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "webapp-child" {
 		if err := webapphost.RunChild(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
