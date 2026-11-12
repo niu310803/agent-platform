@@ -98,6 +98,55 @@ func TestPreparationRawInitAndBundledPrecedence(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+func TestPreparationProvidesConnectorBinDirAndArch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX process integration")
+	}
+	root := filepath.Join(t.TempDir(), "connector packages")
+	t.Setenv("CONNECTOR_BIN_DIR", t.TempDir())
+	t.Setenv("CONNECTOR_ARCH", "inherited-arch")
+	m := New(t.Context(), connector.Sources{ExternalRoot: root}, nil).
+		WithInheritEnv([]string{"PATH", "CONNECTOR_BIN_DIR", "CONNECTOR_ARCH"})
+	const checkArch = `test "$CONNECTOR_ARCH" = ` + runtime.GOARCH
+
+	for _, id := range []string{"first", "second"} {
+		t.Run(id, func(t *testing.T) {
+			cli := simpleCLI()
+			cli["versionCheck"].(map[string]any)["command"] = osCommands(`"$CONNECTOR_BIN_DIR/` + id + `" --version`)
+			pkg := writeCLIPackage(t, root, id, cli)
+			bin := filepath.Join(pkg.Dir, "bin")
+			if err := os.Mkdir(bin, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(bin, id), []byte("#!/bin/sh\n"+checkArch+" && echo 1.2.0\n"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if state, err := m.Prepare(t.Context(), id); err != nil || state.Status != "ready" {
+				t.Fatalf("prepare: %+v %v", state, err)
+			}
+		})
+	}
+
+	t.Run("managed", func(t *testing.T) {
+		cli := simpleCLI()
+		cli["env"] = map[string]any{"CONNECTOR_BIN_DIR": "package-bin", "CONNECTOR_ARCH": "package-arch"}
+		cli["init"] = osCommands(`set -e
+` + checkArch + `
+test "$CONNECTOR_BIN_DIR" = "$npm_config_prefix/bin"
+test -d "$CONNECTOR_BIN_DIR"
+cat > "$CONNECTOR_BIN_DIR/demo" <<'SCRIPT'
+#!/bin/sh
+test "$CONNECTOR_BIN_DIR/demo" = "$0" && ` + checkArch + ` && echo 1.2.0
+SCRIPT
+chmod +x "$CONNECTOR_BIN_DIR/demo"
+test "$(command -v demo)" = "$CONNECTOR_BIN_DIR/demo"`)
+		pkg := writeCLIPackage(t, root, "managed", cli)
+		if state, err := m.Prepare(t.Context(), pkg.ID); err != nil || state.Status != "ready" {
+			t.Fatalf("prepare: %+v %v", state, err)
+		}
+	})
+}
+
 func TestPreparationCancellationConflictRecoveryAndRetry(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX process integration")
@@ -152,7 +201,13 @@ func TestPreparationCancellationConflictRecoveryAndRetry(t *testing.T) {
 }
 func TestPreparationExternalCommandWithoutInit(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "cli.js")
-	os.WriteFile(script, []byte("console.log('1.2.0')"), 0600)
+	if err := os.WriteFile(script, []byte(`
+const { CONNECTOR_BIN_DIR, CONNECTOR_ARCH } = process.env;
+if (CONNECTOR_ARCH !== '`+runtime.GOARCH+`' || !require('node:fs').statSync(CONNECTOR_BIN_DIR).isDirectory()) process.exit(1);
+console.log('1.2.0');
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	testNodeCLI(t, script)
 	root := t.TempDir()
 	writeCLIPackage(t, root, "demo", simpleCLI())
@@ -161,6 +216,9 @@ func TestPreparationExternalCommandWithoutInit(t *testing.T) {
 	defer cancel()
 	if _, err := m.Prepare(ctx, "demo"); err != nil {
 		t.Fatal(err)
+	}
+	if installation, err := connector.ReadInstallation(m.sources.InstallRoot(), "demo"); err != nil || installation.Prefix != "" {
+		t.Fatal("an external command kept a private installation", installation, err)
 	}
 	if _, err := m.Start("demo"); err == nil {
 		t.Fatal("CLI without auth has interactive login")
