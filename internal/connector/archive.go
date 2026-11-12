@@ -347,10 +347,7 @@ func (p *PreparedArchive) PublishConditional(ctx context.Context, overwrite bool
 			// Keep the deletion fence throughout reload so another Manager cannot
 			// start authorization against a publication that may still roll back.
 			// The committed installation retains the generation fencing old jobs.
-			active := previousControl
-			active.Deleted, active.Deleting = false, false
-			activatedControl = true
-			err = WriteStateControl(p.sources.PersistentRoot(), pkg.ID, active)
+			activatedControl, err = activatePackageState(p.sources, pkg.ID)
 			unlockState()
 		}
 	}
