@@ -426,24 +426,32 @@ func (m *Manager) prepareCLI(ctx context.Context, pkg connector.Package, fingerp
 	if err = os.MkdirAll(filepath.Join(dir, "config"), 0700); err != nil {
 		return "", release, err
 	}
-	if pkg.BinDir == "" && pkg.CLI["init"] != nil {
-		var lease func()
-		if prefix, lease, err = connector.NewInstallPrefix(m.sources.InstallRoot(), pkg.ID, pkg.Version, fingerprint); err != nil {
-			return "", release, err
+	config, checkVersion := pkg.CLI["versionCheck"].(map[string]any)
+	needsInit := pkg.BinDir == "" && pkg.CLI["init"] != nil
+	var installBin string
+	if pkg.BinDir == "" && (needsInit || checkVersion) {
+		attempt, lease, createErr := connector.NewInstallPrefix(m.sources.InstallRoot(), pkg.ID, pkg.Version, fingerprint)
+		if createErr != nil {
+			return "", release, createErr
 		}
 		release = lease
-		// A failed attempt's directory is never active; remove it.
-		attempt := prefix
+		// A version check of an existing host command needs a bin directory
+		// during preparation only. Failed attempts are never made active.
 		defer func() {
-			if err != nil {
+			if err != nil || !needsInit {
 				_ = os.RemoveAll(attempt)
 				lease()
 			}
 		}()
+		installBin = connector.InstallBin(attempt)
+		if err := os.MkdirAll(installBin, 0755); err != nil {
+			return "", release, err
+		}
+		if needsInit {
+			prefix = attempt
+		}
 	}
-	// The new installation is searched first; the active one stays in use
-	// until this preparation succeeds.
-	env, err := m.cliEnvironmentWith(pkg, connector.InstallBin(prefix))
+	env, err := m.cliEnvironmentWith(pkg, installBin)
 	if err != nil {
 		return "", release, err
 	}
@@ -467,7 +475,15 @@ func (m *Manager) prepareCLI(ctx context.Context, pkg connector.Package, fingerp
 			return "", release, fmt.Errorf("Node.js >=%d is required", major)
 		}
 	}
-	if pkg.BinDir == "" && pkg.CLI["init"] != nil {
+	if needsInit || checkVersion {
+		binDir := pkg.BinDir
+		if binDir == "" {
+			binDir = installBin
+		}
+		env = hostenv.Set(env, "CONNECTOR_BIN_DIR", binDir)
+		env = hostenv.Set(env, "CONNECTOR_ARCH", runtime.GOARCH)
+	}
+	if needsInit {
 		line, err := cliLine(pkg.CLI["init"], false)
 		if err != nil {
 			return "", release, err
@@ -494,8 +510,7 @@ func (m *Manager) prepareCLI(ctx context.Context, pkg connector.Package, fingerp
 			return "", release, &CLIExecutionError{Stage: "init", ExitCode: exitCode(cmd), Diagnostic: diagnosticExcerpt(output), Cause: err}
 		}
 	}
-	config, ok := pkg.CLI["versionCheck"].(map[string]any)
-	if !ok {
+	if !checkVersion {
 		return prefix, release, nil
 	}
 	line, err := cliLine(config["command"], false)
