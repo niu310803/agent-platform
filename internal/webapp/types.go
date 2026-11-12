@@ -33,10 +33,22 @@ type Manifest struct {
 	Target             string          `json:"target"`
 	AppConfig          map[string]any  `json:"appConfig"`
 	UserConfig         *UserConfig     `json:"userConfig,omitempty"`
+	Authentication     *Authentication `json:"authentication,omitempty"`
 	Frontend           Frontend        `json:"frontend"`
 	Backend            *Backend        `json:"backend,omitempty"`
 	Copilot            *Copilot        `json:"copilot,omitempty"`
 	DesktopBridge      json.RawMessage `json:"desktopBridge,omitempty"`
+}
+
+// Authentication belongs to the external image host, never to Agent execution.
+// Omission preserves existing Desktop/single packages; image startup requires it.
+type Authentication struct {
+	Mode        string   `json:"mode"`
+	Protocol    string   `json:"protocol,omitempty"`
+	ProviderRef string   `json:"providerRef,omitempty"`
+	CheckPath   string   `json:"checkPath,omitempty"`
+	LoginPath   string   `json:"loginPath,omitempty"`
+	PublicPaths []string `json:"publicPaths,omitempty"`
 }
 type Frontend struct {
 	Root        string `json:"root"`

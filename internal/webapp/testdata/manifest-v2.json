@@ -611,6 +611,304 @@
           }
         }
       }
+    },
+    {
+      "name": "auth-none",
+      "valid": true,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "http",
+            "path": "/api/health"
+          }
+        },
+        "authentication": {
+          "mode": "none"
+        }
+      }
+    },
+    {
+      "name": "auth-oidc",
+      "valid": true,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "http",
+            "path": "/api/health"
+          }
+        },
+        "authentication": {
+          "mode": "sso",
+          "protocol": "oidc",
+          "providerRef": "company-sso"
+        }
+      }
+    },
+    {
+      "name": "auth-unknown",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "http",
+            "path": "/api/health"
+          }
+        },
+        "authentication": {
+          "mode": "gateway"
+        }
+      }
+    },
+    {
+      "name": "auth-no-oauth-identity",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "http",
+            "path": "/api/health"
+          }
+        },
+        "authentication": {
+          "mode": "sso",
+          "protocol": "oauth2",
+          "providerRef": "sso"
+        }
+      }
+    },
+    {
+      "name": "auth-none-extra",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "http",
+            "path": "/api/health"
+          }
+        },
+        "authentication": {
+          "mode": "none",
+          "providerRef": "sso"
+        }
+      }
+    },
+    {
+      "name": "auth-custom",
+      "valid": true,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "http",
+            "path": "/api/health"
+          }
+        },
+        "authentication": {
+          "mode": "custom",
+          "checkPath": "/api/auth/check",
+          "loginPath": "/login",
+          "publicPaths": [
+            "/api/auth/login"
+          ]
+        }
+      }
+    },
+    {
+      "name": "auth-injection",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "http",
+            "path": "/api/health"
+          }
+        },
+        "authentication": {
+          "mode": "custom",
+          "checkPath": "/api/auth/check;return 200",
+          "loginPath": "/login"
+        }
+      }
+    },
+    {
+      "name": "auth-check-public",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "http",
+            "path": "/api/health"
+          }
+        },
+        "authentication": {
+          "mode": "custom",
+          "checkPath": "/api/auth/check",
+          "loginPath": "/login",
+          "publicPaths": [
+            "/api/"
+          ]
+        }
+      }
+    },
+    {
+      "name": "auth-check-under-login",
+      "valid": false,
+      "manifest": {
+        "schemaVersion": 2,
+        "id": "webapp-0123456789abcdef",
+        "key": "contract-sample",
+        "label": "Contract sample",
+        "version": "1.0.0",
+        "target": "any",
+        "frontend": {
+          "root": "frontend",
+          "index": "index.html"
+        },
+        "hosting": "platform",
+        "minPlatformVersion": "0.6.0",
+        "backend": {
+          "command": {
+            "type": "node",
+            "entry": "backend/server.mjs"
+          },
+          "health": {
+            "type": "http",
+            "path": "/api/health"
+          }
+        },
+        "authentication": {
+          "mode": "custom",
+          "checkPath": "/api/login/check",
+          "loginPath": "/api/login/"
+        }
+      }
     }
   ]
 }

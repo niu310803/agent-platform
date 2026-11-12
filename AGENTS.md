@@ -12,6 +12,8 @@
 
 Desktop 管理多个 WebApp：共享资源模式沿用 Desktop 主 Platform，独立模式使用应用专属 Platform 与环境。Platform 的 Compose 多应用安装与托管已移除，普通 standalone 仅提供智能体服务并对接 agent-webclient。现有 `--webapp-host=single` 只读取宿主已经安装的一个包，不扫描或安装应用；其适配合同见 [WebApp 独立实例](docs/WebApp独立实例.md)。`internal/webapp` 保存单实例授权和生命周期，安装、升级、卸载由外部宿主负责；`webappgateway`、`webapphost` 和 `webappbridge` 保留单实例网关、受限 Node 及 Runtime/Catalog/ChatResource/connectorops 适配。旧 `--webapp-host=compose` 与 `runtime.yml` 的 `webapps` 节硬失败；独立实例后续装配必须遵循应用资源、凭据与运行数据完全独立的边界，不得复用 Desktop 的共享 registry 或连接器授权。
 
+独立 WebApp 外部镜像由 `deploy/webapp` 维护，用同一基础镜像启动 Nginx、业务 Backend、认证组件与普通 standalone Platform 的独立容器角色；不是恢复 Platform Compose 多应用宿主。认证声明编译与服务私有网络边界见 [WebApp 容器部署](docs/WebApp容器部署.md)。
+
 Memory 由 Platform worker 调用 memx 维护分层 Agent daily/summary 与总体 summary（agents→summarize→consolidate），预算使用 memory.summary.global/agent；旧 worker.summary-max-chars 拒绝，分层管理 API 尚未完成；上下文由 contextConfig.tags 的 memory-global/memory-agent 独立选择，memoryConfig.enabled 仅控制采集，支持定时增量与手工日期范围任务（独立进度、配置模型）；知识库通过受管 KBX CLI 读取和维护，Platform 管理目录监听、库级自动维护与重启对账。当前范围见 [记忆系统](docs/记忆系统.md) 与 [KBX 接入](docs/KBX接入.md)。
 
 ## 2. 技术栈

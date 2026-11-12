@@ -1,0 +1,9 @@
+{
+  "company-sso": {
+    "issuer": "https://identity.example.com",
+    "clientId": "your-webapp-client",
+    "clientSecret": "replace-in-private-runtime-config",
+    "tokenEndpointAuthMethod": "client_secret_basic",
+    "publicOrigin": "https://auditor.example.com"
+  }
+}

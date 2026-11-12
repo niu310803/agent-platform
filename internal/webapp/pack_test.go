@@ -306,3 +306,46 @@ func TestPackageToolingRejectsOversizedOutputAndPreservesOldOutput(t *testing.T)
 		t.Fatalf("temporary output was not cleaned up: %v %v", entries, err)
 	}
 }
+
+func TestUnpackFreshDestinationPreservesExecutableAndRefusesOverwrite(t *testing.T) {
+	source := toolingSource(t, true)
+	output := filepath.Join(t.TempDir(), "app")
+	if _, err := UnpackPackage(context.Background(), source, output); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnpackPackage(context.Background(), source, output); err == nil {
+		t.Fatal("overwrote installed app")
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(filepath.Join(output, "platform/connectors-center/sample/bin/tool"))
+		if err != nil || info.Mode().Perm()&0111 == 0 {
+			t.Fatalf("lost CLI execution mode: %v", err)
+		}
+	}
+	target := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(output, target); err == nil {
+		if _, err := UnpackPackage(context.Background(), source, target); err == nil {
+			t.Fatal("followed existing symlink")
+		}
+	}
+}
+
+func TestUnpackRejectsUnsupportedPlatformBeforeWriting(t *testing.T) {
+	source := toolingSource(t, true)
+	var m map[string]any
+	if err := json.Unmarshal(toolingManifest(true), &m); err != nil {
+		t.Fatal(err)
+	}
+	m["minPlatformVersion"] = "9999.0.0"
+	raw, _ := json.Marshal(m)
+	if err := os.WriteFile(filepath.Join(source, "webapp.json"), raw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "app")
+	if _, err := UnpackPackage(context.Background(), source, output); err == nil {
+		t.Fatal("accepted unsupported Platform")
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatal("wrote unsupported package")
+	}
+}

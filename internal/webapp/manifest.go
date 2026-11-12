@@ -235,6 +235,27 @@ func ParseManifest(raw []byte) (Manifest, error) {
 	if m.Frontend.RouteConfig.BackendPrefixes == nil {
 		m.Frontend.RouteConfig.BackendPrefixes = []string{}
 	}
+	if a := m.Authentication; a != nil && a.Mode == "custom" {
+		if m.Backend == nil || strings.HasSuffix(a.CheckPath, "/") || a.CheckPath == a.LoginPath {
+			return bad()
+		}
+		for _, p := range append([]string{a.CheckPath, a.LoginPath}, a.PublicPaths...) {
+			trimmed := strings.TrimSuffix(p, "/")
+			if path.Clean(trimmed) != trimmed || strings.Contains(p, "//") {
+				return bad()
+			}
+			for _, reserved := range []string{"/__webapp", "/__auth", "/__internal", "/__desktop"} {
+				if trimmed == reserved || strings.HasPrefix(trimmed, reserved+"/") {
+					return bad()
+				}
+			}
+		}
+		for _, p := range append([]string{a.LoginPath}, a.PublicPaths...) {
+			if a.CheckPath == p || strings.HasSuffix(p, "/") && strings.HasPrefix(a.CheckPath, p) {
+				return bad()
+			}
+		}
+	}
 	if len(m.Frontend.RouteConfig.BackendPrefixes) > 0 && m.Backend == nil {
 		return bad()
 	}

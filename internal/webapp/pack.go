@@ -14,6 +14,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	platform "agent-platform"
+	"golang.org/x/mod/semver"
 )
 
 // Package tooling is offline: it never opens runtime stores or runs application code.
@@ -290,6 +293,62 @@ func readPackage(ctx context.Context, source string, directoryOnly bool) (*packa
 func CheckPackage(ctx context.Context, source string) (PackageReport, error) {
 	_, report, err := readPackage(ctx, source, false)
 	return report, err
+}
+
+// UnpackPackage validates the entire input before writing a fresh destination.
+// It never merges into a runtime or follows an existing destination symlink.
+func UnpackPackage(ctx context.Context, source, output string) (PackageReport, error) {
+	p, report, err := readPackage(ctx, source, false)
+	if err != nil {
+		return report, err
+	}
+	if p.manifest.Hosting == "platform" && semver.Compare("v"+platform.Version(), "v"+p.manifest.MinPlatformVersion) < 0 {
+		return report, fmt.Errorf("WebApp requires Platform %s (current %s)", p.manifest.MinPlatformVersion, platform.Version())
+	}
+	if output == "" {
+		return report, fmt.Errorf("unpack requires --output")
+	}
+	output, err = filepath.Abs(output)
+	if err != nil {
+		return report, err
+	}
+	if _, err = os.Lstat(output); !os.IsNotExist(err) {
+		return report, fmt.Errorf("unpack destination must not exist")
+	}
+	if err = os.MkdirAll(filepath.Dir(output), 0700); err != nil {
+		return report, err
+	}
+	stage, err := os.MkdirTemp(filepath.Dir(output), ".webapp-unpack-")
+	if err != nil {
+		return report, err
+	}
+	defer os.RemoveAll(stage)
+	for _, f := range p.files {
+		if err = ctx.Err(); err != nil {
+			return report, err
+		}
+		target := filepath.Join(stage, filepath.FromSlash(f.name))
+		if f.mode.IsDir() {
+			err = os.MkdirAll(target, 0755)
+		} else {
+			err = os.MkdirAll(filepath.Dir(target), 0755)
+			if err == nil {
+				mode := fs.FileMode(0644)
+				if f.mode.Perm()&0111 != 0 {
+					mode = 0755
+				}
+				err = os.WriteFile(target, f.data, mode)
+			}
+		}
+		if err != nil {
+			return report, err
+		}
+	}
+	if err = os.Rename(stage, output); err != nil {
+		return report, err
+	}
+	report.Output = output
+	return report, nil
 }
 
 func packageOutputPath(output string) (string, error) {

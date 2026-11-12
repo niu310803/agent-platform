@@ -1,0 +1,11 @@
+*
+!build/
+build/*
+!build/webapp-image/
+!build/webapp-image/agent-platform
+!deploy/
+deploy/*
+!deploy/webapp/
+deploy/webapp/*
+!deploy/webapp/host/
+!deploy/webapp/host/**

@@ -453,3 +453,5 @@ docker compose logs -f
 Query 与 steer 的技能、知识库和对话统一使用 references；对话仅传 chatId，通过 task-control 按需读取。旧选择字段硬切，详见 [引用协议](docs/引用协议.md)。
 
 按 URL 直接调用远程 MCP 的受信 WebApp 入口为 `POST /api/mcp/invoke`，无需安装连接器；HTTP 宿主鉴权、独立实例 SDK 与 SSO 供应边界见 [远程 MCP 调用](docs/远程MCP调用.md)。
+
+独立 WebApp 的 Nginx/Backend/用户认证部署见 [WebApp 容器部署](docs/WebApp容器部署.md)；它使用普通 standalone Platform，与 Desktop/single 宿主分开。

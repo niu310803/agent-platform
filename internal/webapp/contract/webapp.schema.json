@@ -49,6 +49,87 @@
       "type": "string",
       "pattern": "^(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$"
     },
+    "authentication": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "none"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "sso"
+            },
+            "protocol": {
+              "type": "string",
+              "const": "oidc"
+            },
+            "providerRef": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+            }
+          },
+          "required": [
+            "mode",
+            "protocol",
+            "providerRef"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "custom"
+            },
+            "checkPath": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 256,
+              "pattern": "^\\/[A-Za-z0-9_./-]+$"
+            },
+            "loginPath": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 256,
+              "pattern": "^\\/[A-Za-z0-9_./-]+$"
+            },
+            "publicPaths": {
+              "default": [],
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 256,
+                "pattern": "^\\/[A-Za-z0-9_./-]+$"
+              }
+            }
+          },
+          "required": [
+            "mode",
+            "checkPath",
+            "loginPath",
+            "publicPaths"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
     "appConfig": {
       "default": {},
       "type": "object",
