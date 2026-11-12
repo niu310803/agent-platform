@@ -86,6 +86,10 @@ func (m *Manager) WithSsoIdTokenFile(path string) *Manager {
 	return m
 }
 
+// SsoIdTokenFile is the deployment-owned identity source for connector execution.
+// Callers must read it at dispatch time; never return its contents to a client.
+func (m *Manager) SsoIdTokenFile() string { return m.ssoIdTokenFile }
+
 func (m *Manager) epoch(id string) uint64 { m.mu.Lock(); defer m.mu.Unlock(); return m.epochs[id] }
 func (m *Manager) beginDisconnect(id string) error {
 	m.mu.Lock()

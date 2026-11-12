@@ -66,6 +66,12 @@ These three actions require a trusted Agent Platform Run in Desktop runtime. All
 
 Initialize a Manifest v2 project, edit its files, validate the directory, then build a validated ZIP at a new output path. Build refuses to overwrite an existing output. Inspect the returned validation result before installing, then pass its `outputPath` as installation `archivePath`. Only installation accepts external absolute paths; package.init/validate/build remain Workspace-bound, including their @chat/@workspace aliases. Do not call the removed `manifest.init`, `manifest.validate`, or `webapp.init` aliases.
 
+## OneID connector execution
+
+WebApp pages/backends (`connector.invoke`) and VIEW queries/actions support OneID CLI, HTTP MCP and stdio MCP. Platform supplies its current managed SSO identity; application permissions, connector configuration and VIEW write confirmation still apply. Missing or invalid identity returns `connector_auth_required` (VIEW maps it to HTTP 409); Desktop deployments require Desktop sign-in. Identity updates apply to subsequent calls.
+
+Agent MCP sync `ready` and `checkConnector` do not verify WebApp execution; test through the application's SDK. Older Platforms returning `connector_oneid_unsupported` require an update/restart.
+
 ## Export
 
 `web.exportArtifact` accepts `{surfaceId, format}` for an authorized WebApp export provider and saves the export to Downloads. It does not provide an export bridge for ordinary webpages. Obtain the `surfaceId` with the web-control `surface_list` tool.

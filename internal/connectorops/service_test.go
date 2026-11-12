@@ -55,7 +55,7 @@ func TestInvokeMCPReusesExistingConnectorCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	pkg, _ := sources.Load("demo")
-	native, err := callMCP(context.Background(), pkg, "main", "text-error", map[string]any{})
+	native, err := callMCP(context.Background(), pkg, "main", "text-error", map[string]any{}, "")
 	var original map[string]any
 	if err != nil || json.Unmarshal(native, &original) != nil || original["isError"] != true {
 		t.Fatal("native MCP result lost", string(native), err)

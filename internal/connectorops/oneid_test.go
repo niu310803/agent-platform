@@ -57,15 +57,10 @@ func writeOneIDExecutionFixture(t *testing.T, fixture oneIDExecutionFixture, mod
 	return sources, pkg
 }
 
-func TestOneIDRejectedBeforeAuthenticationAndWriteReceipt(t *testing.T) {
+func TestOneIDRequiresIdentityBeforeWriteReceipt(t *testing.T) {
 	for _, fixture := range oneIDExecutionFixtures() {
-		for _, loggedIn := range []bool{false, true} {
-			name := fixture.name
-			if loggedIn {
-				name += "/signed in"
-			} else {
-				name += "/signed out"
-			}
+		for _, identityState := range []string{"missing", "empty", "invalid"} {
+			name := fixture.name + "/" + identityState
 			t.Run(name, func(t *testing.T) {
 				sources, pkg := writeOneIDExecutionFixture(t, fixture, connector.AuthOneID)
 				if _, err := pkg.SetConfigured(true); err != nil {
@@ -73,11 +68,14 @@ func TestOneIDRejectedBeforeAuthenticationAndWriteReceipt(t *testing.T) {
 				}
 				identity := filepath.Join(t.TempDir(), "identity")
 				wantStatus := "unauthorized"
-				if loggedIn {
-					if err := os.WriteFile(identity, []byte("synthetic-test-token"), 0600); err != nil {
+				if identityState != "missing" {
+					value := ""
+					if identityState == "invalid" {
+						value = "invalid\ntoken"
+					}
+					if err := os.WriteFile(identity, []byte(value), 0600); err != nil {
 						t.Fatal(err)
 					}
-					wantStatus = "authorized"
 				}
 				manager := connectorauth.New(t.Context(), sources, nil).WithSsoIdTokenFile(identity)
 				status, err := manager.StatusComponent(t.Context(), "demo", "")
@@ -99,26 +97,26 @@ func TestOneIDRejectedBeforeAuthenticationAndWriteReceipt(t *testing.T) {
 						for range 2 {
 							_, err := service.Invoke(t.Context(), scope, req)
 							var failure *Error
-							if !errors.As(err, &failure) || failure.Code != "connector_oneid_unsupported" || failure.Status != http.StatusUnprocessableEntity {
-								t.Fatalf("adapter %q key %q: unsupported oneid returned %v", req.Adapter, key, err)
+							if !errors.As(err, &failure) || failure.Code != "connector_auth_required" || failure.Status != http.StatusUnauthorized {
+								t.Fatalf("adapter %q key %q: unauthenticated oneid returned %v", req.Adapter, key, err)
 							}
 						}
 					}
 				}
 				if _, err := os.Stat(filepath.Join(sources.PersistentRoot(), "demo", "invocations")); !os.IsNotExist(err) {
-					t.Fatalf("unsupported oneid created write receipts: %v", err)
+					t.Fatalf("unauthenticated oneid created write receipts: %v", err)
 				}
 				scope.Execution = nil
 				_, err = service.Invoke(t.Context(), scope, requests[0])
 				if err == nil || err.Error() != "connector_execution_not_allowed" {
-					t.Fatalf("unsupported oneid bypassed permission check: %v", err)
+					t.Fatalf("unauthenticated oneid bypassed permission check: %v", err)
 				}
 			})
 		}
 	}
 }
 
-func TestOneIDCatalogDoesNotAdvertiseExecutionCapabilities(t *testing.T) {
+func TestOneIDCatalogAdvertisesExecutionCapabilities(t *testing.T) {
 	for _, fixture := range oneIDExecutionFixtures() {
 		for _, mode := range []connector.AuthMode{connector.AuthOneID, connector.AuthDelegated} {
 			// The credential template belongs to OneID only.
@@ -128,14 +126,12 @@ func TestOneIDCatalogDoesNotAdvertiseExecutionCapabilities(t *testing.T) {
 			t.Run(fixture.name+"/"+string(mode), func(t *testing.T) {
 				sources, pkg := writeOneIDExecutionFixture(t, fixture, mode)
 				wantAdapters, wantComponents := []string{}, []string{}
-				if mode != connector.AuthOneID {
-					if fixture.cli != "" {
-						wantAdapters = append(wantAdapters, "cli")
-					}
-					if fixture.mcp != "" {
-						wantAdapters = append(wantAdapters, "mcp")
-						wantComponents = append(wantComponents, "main")
-					}
+				if fixture.cli != "" {
+					wantAdapters = append(wantAdapters, "cli")
+				}
+				if fixture.mcp != "" {
+					wantAdapters = append(wantAdapters, "mcp")
+					wantComponents = append(wantComponents, "main")
 				}
 				check := func(c Catalog, err error) {
 					t.Helper()

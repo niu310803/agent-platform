@@ -216,8 +216,7 @@ display VIEW 可以在 `view.json` 声明只读查询，模板按 Markdown 块�
 
    | 错误码 | 含义 | 建议提示 |
    |---|---|---|
-   | `connector_oneid_unsupported` | 当前执行入口不支持 oneid 连接器（HTTP 422） | 当前 VIEW 查询或写操作不支持此连接器，重新登录无法解决 |
-   | `connector_auth_required` | 未登录或登录失效 | 请先在连接器页面完成授权 |
+   | `connector_auth_required` | 未登录或登录失效 | oneid 请登录身份供给方（Desktop 部署为 Desktop）；其他模式在连接器页面完成授权 |
    | `connector_configuration_required` | 尚未配置 | 请先完成连接器配置 |
    | `connector_preparation_required` | CLI 尚未准备 | 连接器尚未准备完成 |
    | `connector_unavailable` | 连接器被删除或不可用 | 连接器不可用 |
@@ -286,7 +285,7 @@ Action 使用与 Query 相同的结构化 cli/mcp 参数模板，当前不支持
 
 `POST /api/view/invoke`（WS 同路径）请求为 `{chatId,runId,view:{connectorId,key,hash},action,params,requestId}`。响应仍为 `{code,msg,data}`，成功 data 为 `{data,executedAt,invocationId,exitCode}`；CLI 业务错误保留原 JSON 和 exitCode，由模板识别 rejected/partial/unknown/applied，不将非零退出伪装成成功。非 JSON 输出按 `invocation_outcome_unknown` 处理。
 
-平台仅接受在线 Chat，校验当前查看者的 Chat 所有权、Run 属于该 Chat、快照身份以及当前 Agent 的有效和源码挂载。写入前及 connectorops 启动前复核当前安装包版本和动作声明；解除挂载、撤销或改变动作后旧快照不能继续写入。`intercept` 只决定 Agent 的 Bash 调用是否进表单审阅，不计入这次比较，开关它不会让已打开的页面失效。授权是当前用户的显式操作，不继承发布 Run 的自动审批等级，不创建模型 Run。连接器凭据仍只由 connectorops 在服务端注入。
+平台仅接受在线 Chat，校验当前查看者的 Chat 所有权、Run 属于该 Chat、快照身份以及当前 Agent 的有效和源码挂载。写入前及 connectorops 启动前复核当前安装包版本和动作声明；解除挂载、撤销或改变动作后旧快照不能继续写入。`intercept` 只决定 Agent 的 Bash 调用是否进表单审阅，不计入这次比较，开关它不会让已打开的页面失效。授权是当前用户的显式操作，不继承发布 Run 的自动审批等级，不创建模型 Run。连接器凭据仍只由 connectorops 在服务端注入。oneid 的 CLI、HTTP MCP 和 stdio MCP 使用 Platform 当前受管 SSO 身份，查询与写操作均不借用发布 Run 的身份或会话，模板不能传入或读取受管 token；缺身份时在写入收据创建前拒绝。
 
 WebClient 为同一 Chat/Run/VIEW hash、动作和规范化参数在 sessionStorage 复用请求 ID；它是防止当前浏览器会话意外重发的辅助层，不是业务去重。服务端复用 connectorops 持久化 claim/result 收据，claim 在派发前落盘，包含用户、Chat、Run、Agent、VIEW、动作、参数和时间审计。stdin 同样进入参数摘要；既有无 stdin 收据的摘要保持兼容。未完成 claim（含进程崩溃、断线或超时）不重放，参数变化使用同一 ID 返回冲突。不能保证 Jira 远端 exactly-once，也不能根据相同参数推断不同浏览器的两次请求是否为同一业务操作。
 

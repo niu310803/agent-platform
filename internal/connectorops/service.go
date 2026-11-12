@@ -142,11 +142,6 @@ func (s *Service) Invoke(ctx context.Context, scope Scope, req Request) (result 
 	if err != nil {
 		return result, failure("connector_unavailable", 503)
 	}
-	// This caller-neutral path has no Desktop identity execution context.
-	// Reject before login checks or claiming a write that will never start.
-	if pkg.AuthMode == connector.AuthOneID {
-		return result, failure("connector_oneid_unsupported", 422)
-	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := connector.RequireConfigured(pkg.PersistentRoot(), pkg.ID, pkg.AuthMode); err != nil {
@@ -228,7 +223,7 @@ func (s *Service) Invoke(ctx context.Context, scope Scope, req Request) (result 
 	if req.Adapter == "cli" {
 		result, err = callCLI(ctx, auth, pkg, req.Args, revision, req.Stdin)
 	} else {
-		result.MCP, err = callMCP(ctx, pkg, req.Component, req.ToolName, req.Arguments)
+		result.MCP, err = callMCP(ctx, pkg, req.Component, req.ToolName, req.Arguments, auth.SsoIdTokenFile())
 	}
 	if ctx.Err() != nil {
 		return result, failure("invocation_timeout", 504)
@@ -306,7 +301,7 @@ func callCLI(ctx context.Context, auth *connectorauth.Manager, pkg connector.Pac
 	if err != nil {
 		return result, failure("connector_auth_required", 401)
 	}
-	credentials, executed, err := connectorauth.ResolveEnvironmentWithRevision(ctx, binding, "")
+	credentials, executed, err := connectorauth.ResolveEnvironmentWithRevision(ctx, binding, auth.SsoIdTokenFile())
 	if err != nil {
 		return result, credentialFailure(err)
 	}
@@ -346,8 +341,8 @@ func callCLI(ctx context.Context, auth *connectorauth.Manager, pkg connector.Pac
 	result.Stderr = diagnostic.b.String()
 	return result, nil
 }
-func callMCP(ctx context.Context, pkg connector.Package, component, toolName string, args map[string]any) (json.RawMessage, error) {
-	client, key, err := mcp.NewOperationClient(pkg, component, toolName)
+func callMCP(ctx context.Context, pkg connector.Package, component, toolName string, args map[string]any, identityFile string) (json.RawMessage, error) {
+	client, key, err := mcp.NewOperationClient(pkg, component, toolName, identityFile)
 	if err != nil {
 		return nil, failure("connector_unavailable", 503)
 	}

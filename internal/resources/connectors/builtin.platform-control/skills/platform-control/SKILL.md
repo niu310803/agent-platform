@@ -21,6 +21,8 @@ catalog_manage apply/import and routine Desktop management use Platform review i
 
 platform_inspect: runtimeStatus {component?}, where component is platform/models/mcp/connectors/kbase/containerHub/memory/catalog; omit it to read all components, and an unknown name is rejected with the accepted names; securityExplain {path,access?} or {tool,action?}. These two actions explain cached state and current policy without starting remote probes. checkConnector {connectorId,component?} explicitly checks a saved HTTP MCP component without an Agent mount; it requires an ordinary native root Run. Read [connector checks](references/catalog.md#check-an-http-mcp-connector) for its results and authorization recovery.
 
+For WebApp/VIEW OneID execution, read [OneID execution](references/webapp.md#oneid-connector-execution); checkConnector's diagnostic limits do not define execution support.
+
 Every project Agent, including a knowledge-base project, must have a concrete existing `runtimeConfig.workspaceRoot` and use `isProject:true` in catalog validate/apply args. Use the project directory established by the user's request; resolve a missing directory before submitting the project. Knowledge sources and Workspace are independent, but that does not make a project's Workspace optional. Read [catalog](references/catalog.md) for directory selection, project checks and post-publication verification.
 
 Read [configuration maintenance](references/configuration.md) for explicitly requested Provider/Model YAML and external connector component source changes. Catalog read-only discovery does not grant source writes; this workflow requires independently available file tools and path permissions.

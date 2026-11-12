@@ -7,15 +7,15 @@ import (
 
 // NewOperationClient creates a single-component, short-lived session using the
 // existing connector credential locator. It never borrows an Agent session.
-func NewOperationClient(pkg connector.Package, component, toolName string) (*Client, string, error) {
-	if pkg.AuthMode == connector.AuthOneID || pkg.MCP[component] == nil {
+func NewOperationClient(pkg connector.Package, component, toolName, identityFile string) (*Client, string, error) {
+	if pkg.MCP[component] == nil {
 		return nil, "", fmt.Errorf("unsupported operation MCP component")
 	}
 	server, err := connectorServer(pkg, component)
 	if err != nil {
 		return nil, "", err
 	}
-	if !server.Enabled() || server.AuthSource == AuthSourceSsoIdTokenFile {
+	if !server.Enabled() {
 		return nil, "", fmt.Errorf("unsupported operation MCP authentication")
 	}
 	for _, disabled := range server.DisabledTools {
@@ -25,5 +25,5 @@ func NewOperationClient(pkg connector.Package, component, toolName string) (*Cli
 	}
 	server.IsolatedEnvironment = true
 	registry := &Registry{servers: map[string]ServerDefinition{server.Key: server}, version: 1}
-	return NewClientWithGate(registry, nil, nil), server.Key, nil
+	return NewClientWithGate(registry, nil, nil).WithSsoIdTokenFile(identityFile), server.Key, nil
 }

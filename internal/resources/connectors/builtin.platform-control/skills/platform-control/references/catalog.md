@@ -139,6 +139,8 @@ Use platform_inspect with action:"checkConnector" and args:{connectorId,componen
 
 This explicit action validates the local package and uses a short-lived, isolated MCP SDK session for initialize/protocol negotiation and tools/list, then closes it. It supports enabled HTTP MCP with authMode none, mcp or token; stdio, oneid and disabled components are not recommended for this action. It does not start stdio/CLI processes, initiate login, change configuration or mount preferences, register runtime tools, or call business tools. OAuth refresh may use the existing credential provider. The remote check is bounded to 30 seconds and respects caller cancellation. Tokens, endpoint URLs, login URLs and raw upstream errors are excluded from the result.
 
+These limits apply only to checkConnector. Authorized WebApp and VIEW execution supports OneID CLI, HTTP MCP and stdio MCP using Platform's managed identity; see [OneID execution](webapp.md#oneid-connector-execution).
+
 The action is intentionally read-only and requires no approval, but it sends protocol requests with the connector's saved credentials to its configured address. There is no additional network target allowlist or intranet isolation. Only check connectors relevant to the user's request.
 
 For authMode mcp without a usable grant, the check first runs authorization discovery without logging in or registering a client: an unauthenticated initialize reads the Bearer challenge, then the protected resource and authorization server metadata are verified (PKCE S256, a usable client registration). Local validation alone does not prove sign-in can start.
