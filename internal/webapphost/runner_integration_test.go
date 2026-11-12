@@ -3,9 +3,7 @@
 package webapphost_test
 
 import (
-	"archive/zip"
 	"bufio"
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -40,7 +38,7 @@ var reference []byte
 func nativeFixture(t *testing.T) (*webapp.Service, *webappgateway.Gateway, webapp.Entry, webapp.Options) {
 	t.Helper()
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" || os.Getenv("WEBAPP_NATIVE_TEST") != "1" {
-		t.Skip("requires hardened native linux/amd64 Compose runtime with locked Node/helper")
+		t.Skip("requires hardened native linux/amd64 Single runtime with locked Node/helper")
 	}
 	status := webapphost.Inspect(context.Background())
 	if !status.BackendPrerequisitesReady {
@@ -51,17 +49,31 @@ func nativeFixture(t *testing.T) (*webapp.Service, *webappgateway.Gateway, webap
 	}
 	t.Cleanup(func() { os.Remove("/tmp/host-only-secret") })
 	root := t.TempDir()
-	cfg := config.DefaultWebAppsConfig()
-	cfg.MaxArchiveMiB = 1
-	cfg.MaxExtractedMiB = 8
+	cfg := config.DefaultWebAppConfig()
 	cfg.Logs.MaxSizeMB = 1
 	cfg.Logs.MaxFiles = 2
 	cfg.PlatformOrigin = "http://127.0.0.1:11948"
 	cfg.Backend.HealthIntervalSeconds = 1
 	cfg.Backend.UnhealthyThreshold = 1
 	cfg.Backend.Restart.MaxAttempts = 2
-	options := webapp.Options{Root: filepath.Join(root, "webapps"), DataRoot: filepath.Join(root, "data"), Config: cfg}
-	options.Runner = webapphost.NewRunner(options.Root, cfg, true)
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"schemaVersion":2,"id":"webapp-0123456789abcdef","key":"reference-app","label":"Reference","version":"1.0.0","hosting":"platform","minPlatformVersion":"0.5.0","target":"any","userConfig":{"fields":[{"type":"text","name":"title","label":"Title","maxLength":64,"default":"new-default"}]},"frontend":{"root":"frontend","index":"index.html","routeConfig":{"backendPrefixes":["/api"]}},"backend":{"command":{"type":"node","entry":"backend/main.cjs"},"health":{"type":"http","path":"/health","startupTimeoutMs":10000},"shutdownTimeoutMs":1000}}`
+	for name, data := range map[string][]byte{"webapp.json": []byte(manifest), "frontend/index.html": []byte("<h1>reference</h1>"), "backend/main.cjs": reference, "backend/bridge.mjs": webappbridge.SDKModule()} {
+		target := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	options := webapp.Options{SingleRoot: root, Root: filepath.Join(root, ".state", "webapps"), DataRoot: filepath.Join(root, "data"), Config: cfg, PlatformVersion: "999.0.0"}
+	runner := webapphost.NewRunner(options.Root, cfg, true)
+	runner.SetNode("")
+	options.Runner = runner
 	s, err := webapp.Open(options)
 	if err != nil {
 		t.Fatal(err)
@@ -70,42 +82,20 @@ func nativeFixture(t *testing.T) (*webapp.Service, *webappgateway.Gateway, webap
 		if err := s.Close(); err != nil {
 			t.Error(err)
 		}
-		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err == nil && d.IsDir() {
-				return os.Chmod(path, 0700)
-			}
-			return err
-		})
 	})
 	bridge := webappbridge.New(webappbridge.Options{Apps: s, Owner: "owner", Connectors: &connectorops.Service{}})
 	if err := bridge.ListenInternal(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(bridge.Close)
-	options.Runner.(*webapphost.Runner).SetBridge(func(spec webapp.RuntimeSpec) (webapphost.BridgeGrant, error) {
+	runner.SetBridge(func(spec webapp.RuntimeSpec) (webapphost.BridgeGrant, error) {
 		url, token, revoke, err := bridge.GrantBackend(spec)
 		return webapphost.BridgeGrant{URL: url, Token: token, Revoke: revoke}, err
 	})
-	var out bytes.Buffer
-	z := zip.NewWriter(&out)
-	manifest := `{"schemaVersion":2,"id":"webapp-0123456789abcdef","key":"reference-app","label":"Reference","version":"1.0.0","target":"linux-x64","frontend":{"root":"frontend","index":"index.html","routeConfig":{"backendPrefixes":["/api"]}},"backend":{"command":{"type":"electron-node","entry":"backend/main.cjs"},"health":{"type":"http","path":"/health","startupTimeoutMs":10000},"shutdownTimeoutMs":1000}}`
-	for name, data := range map[string][]byte{"webapp.json": []byte(manifest), "frontend/index.html": []byte("<h1>reference</h1>"), "backend/main.cjs": reference, "backend/bridge.mjs": bridge.Module()} {
-		f, _ := z.Create("webapp-0123456789abcdef/" + name)
-		_, _ = f.Write(data)
-	}
-	z.Close()
-	u, err := s.Upload(context.Background(), &out)
-	if err != nil {
+	if err := s.RestoreDesired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	e, err := s.Install(context.Background(), webapp.InstallRequest{UploadID: u.UploadID, SHA256: u.SHA256})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e, err = s.Start(context.Background(), e.ID, webapp.StateRequest{ExpectedRevision: e.Revision, ExpectedStateRevision: e.StateRevision})
-	if err != nil {
-		t.Fatal(err)
-	}
+	e := s.Current()
 	e = waitState(t, s, e.ID, "running")
 	g := webappgateway.New(s, cfg)
 	g.Actions = bridge
@@ -152,7 +142,7 @@ func openClient(t *testing.T, g *webappgateway.Gateway, id string) (*http.Client
 	}
 	return client, strings.TrimSuffix(launch.Action, "/__desktop/session/exchange")
 }
-func TestComposeNativeNodeProxyAndIsolation(t *testing.T) {
+func TestSingleNativeNodeProxyAndIsolation(t *testing.T) {
 	s, g, e, _ := nativeFixture(t)
 	client, origin := openClient(t, g, e.ID)
 	response, err := client.Get(origin + "/api/probes")
@@ -201,7 +191,7 @@ func TestComposeNativeNodeProxyAndIsolation(t *testing.T) {
 		t.Fatal("logs", page, err)
 	}
 }
-func TestComposeNativeStopClosesWSAndSSEAndRestoresData(t *testing.T) {
+func TestSingleNativeStopClosesWSAndSSEAndRestoresData(t *testing.T) {
 	s, g, e, options := nativeFixture(t)
 	client, origin := openClient(t, g, e.ID)
 	response, err := client.Get(origin + "/api/sse")
@@ -272,6 +262,7 @@ func TestComposeNativeStopClosesWSAndSSEAndRestoresData(t *testing.T) {
 	}
 	g.Close()
 	options.Runner = webapphost.NewRunner(options.Root, options.Config, true)
+	options.Runner.(*webapphost.Runner).SetNode("")
 	restored, err := webapp.Open(options)
 	if err != nil {
 		t.Fatal(err)
@@ -290,7 +281,7 @@ func TestComposeNativeStopClosesWSAndSSEAndRestoresData(t *testing.T) {
 	}
 }
 
-func TestComposeNativeWatcherAndSupervisorDeathsDrainBeforeRestart(t *testing.T) {
+func TestSingleNativeWatcherAndSupervisorDeathsDrainBeforeRestart(t *testing.T) {
 	for _, which := range []string{"watcher", "supervisor"} {
 		t.Run(which, func(t *testing.T) {
 			s, _, e, _ := nativeFixture(t)
@@ -363,74 +354,7 @@ func allChildren(pid int) ([]byte, error) {
 	return result, nil
 }
 
-func updateNative(t *testing.T, s *webapp.Service, e webapp.Entry, version, health string) (webapp.Entry, error) {
-	t.Helper()
-	manifest := map[string]any{"schemaVersion": 2, "id": e.ID, "key": "reference-app", "label": "Reference", "version": version, "target": "linux-x64", "frontend": map[string]any{"root": "frontend", "index": "index.html", "routeConfig": map[string]any{"backendPrefixes": []string{"/api"}}}, "userConfig": map[string]any{"fields": []any{map[string]any{"name": "title", "label": "Title", "type": "text", "default": "new-default"}}}, "backend": map[string]any{"command": map[string]any{"type": "electron-node", "entry": "backend/main.cjs"}, "health": map[string]any{"type": "http", "path": health, "startupTimeoutMs": 1000}, "shutdownTimeoutMs": 1000}}
-	raw, _ := json.Marshal(manifest)
-	var out bytes.Buffer
-	z := zip.NewWriter(&out)
-	for name, data := range map[string][]byte{"webapp.json": raw, "frontend/index.html": []byte("<h1>" + version + "</h1>"), "backend/main.cjs": reference, "backend/bridge.mjs": webappbridge.SDKModule()} {
-		f, _ := z.Create(e.ID + "/" + name)
-		f.Write(data)
-	}
-	z.Close()
-	u, err := s.Upload(context.Background(), &out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	return s.Install(ctx, webapp.InstallRequest{UploadID: u.UploadID, SHA256: u.SHA256, ExpectedRevision: e.Revision})
-}
-func TestComposeNativeRunningUpdateRollbackAndReadOnlyConfigSnapshot(t *testing.T) {
-	s, g, e, _ := nativeFixture(t)
-	oldScope, err := s.Acquire(e.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldScope.Release()
-	oldGeneration := e.Generation
-	updated, err := updateNative(t, s, e, "2.0.0", "/health")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.Version != "2.0.0" || updated.ObservedState != "running" || updated.Generation == oldGeneration || oldScope.Check() == nil {
-		t.Fatal("bad running update", updated)
-	}
-	client, origin := openClient(t, g, e.ID)
-	response, err := client.Get(origin + "/api/probes")
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := io.ReadAll(response.Body)
-	response.Body.Close()
-	var probes map[string]any
-	json.Unmarshal(raw, &probes)
-	config, _ := probes["config"].(map[string]any)
-	if config["title"] != "new-default" || probes["configWriteDenied"] != true {
-		t.Fatal("snapshot", string(raw))
-	}
-	_, err = updateNative(t, s, updated, "3.0.0", "/missing-health")
-	code, _ := webapp.ErrorCode(err)
-	if code != "webapp_update_health_failed" {
-		t.Fatal("bad update succeeded", err)
-	}
-	restored := waitState(t, s, e.ID, "running")
-	if restored.Version != "2.0.0" || restored.Revision != updated.Revision {
-		t.Fatal("old version not restored", restored)
-	}
-	scope, err := s.Acquire(e.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dataRoot := scope.DataRoot
-	scope.Release()
-	raw, err = os.ReadFile(filepath.Join(dataRoot, "value"))
-	if err != nil || string(raw) != "persistent" {
-		t.Fatal("rollback lost data")
-	}
-}
-func TestComposeNativeStopCancelsBackoffAndRestartBudgetExhausts(t *testing.T) {
+func TestSingleNativeStopCancelsBackoffAndRestartBudgetExhausts(t *testing.T) {
 	s, g, e, _ := nativeFixture(t)
 	for attempt := 0; attempt < 3; attempt++ {
 		client, origin := openClient(t, g, e.ID)
@@ -483,12 +407,8 @@ func TestComposeNativeStopCancelsBackoffAndRestartBudgetExhausts(t *testing.T) {
 	}
 }
 
-func TestComposeNativeConfigurationAndPolicyRebuildGeneration(t *testing.T) {
+func TestSingleNativeConfigurationAndPolicyRebuildGeneration(t *testing.T) {
 	s, _, e, _ := nativeFixture(t)
-	e, err := updateNative(t, s, e, "2.0.0", "/health")
-	if err != nil {
-		t.Fatal(err)
-	}
 	old, err := s.Acquire(e.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -514,7 +434,7 @@ func TestComposeNativeConfigurationAndPolicyRebuildGeneration(t *testing.T) {
 	if current.UserConfig["title"] != "owner-change" {
 		t.Fatal("configuration lost")
 	}
-	if _, err = s.SavePolicy(e.ID, webapp.PolicyRequest{ExpectedRevision: changed.Policy.Revision, Assistant: true}); err != nil {
+	if _, err = s.SavePolicy(e.ID, webapp.PolicyRequest{ExpectedRevision: changed.Policy.Revision, ConnectPorts: []int{443}}); err != nil {
 		t.Fatal(err)
 	}
 	e = waitState(t, s, e.ID, "running")
@@ -523,7 +443,7 @@ func TestComposeNativeConfigurationAndPolicyRebuildGeneration(t *testing.T) {
 	}
 }
 
-func TestComposeNativeBackendSDKUsesScopedInternalTransport(t *testing.T) {
+func TestSingleNativeBackendSDKUsesScopedInternalTransport(t *testing.T) {
 	s, g, e, _ := nativeFixture(t)
 	client, origin := openClient(t, g, e.ID)
 	response, err := client.Get(origin + "/api/sdk")
@@ -560,7 +480,7 @@ func TestComposeNativeBackendSDKUsesScopedInternalTransport(t *testing.T) {
 	}
 }
 
-func TestComposeNativeDiskAndLogPressureRecover(t *testing.T) {
+func TestSingleNativeDiskAndLogPressureRecover(t *testing.T) {
 	s, g, e, options := nativeFixture(t)
 	client, origin := openClient(t, g, e.ID)
 	response, err := client.Get(origin + "/api/disk-pressure")
@@ -628,7 +548,7 @@ func (r *captureNativeRunner) Start(ctx context.Context, spec webapp.RuntimeSpec
 	}
 	return r.Runner.Start(ctx, spec)
 }
-func TestComposeNativeRSSLimitAndOccupiedPort(t *testing.T) {
+func TestSingleNativeRSSLimitAndOccupiedPort(t *testing.T) {
 	for _, kind := range []string{"rss", "port"} {
 		t.Run(kind, func(t *testing.T) {
 			s, _, e, options := nativeFixture(t)
@@ -646,8 +566,7 @@ func TestComposeNativeRSSLimitAndOccupiedPort(t *testing.T) {
 				}
 				defer occupied.Close()
 				port := occupied.Addr().(*net.TCPAddr).Port
-				options.Config.Backend.PortStart = port
-				options.Config.Backend.PortEnd = port
+				options.Config.Backend.Port = port
 			}
 			capture := &captureNativeRunner{Runner: webapphost.NewRunner(options.Root, options.Config, true), failures: make(chan string, 8)}
 			options.Runner = capture
@@ -683,7 +602,7 @@ func TestComposeNativeRSSLimitAndOccupiedPort(t *testing.T) {
 	}
 }
 
-func TestComposeNativeIsolationFailureDoesNotExecNode(t *testing.T) {
+func TestSingleNativeIsolationFailureDoesNotExecNode(t *testing.T) {
 	if os.Getenv("WEBAPP_EXPECT_LANDLOCK_DENIED") != "1" {
 		t.Skip("requires explicit seccomp Landlock denial")
 	}
@@ -692,7 +611,7 @@ func TestComposeNativeIsolationFailureDoesNotExecNode(t *testing.T) {
 		t.Fatalf("denied isolation reported ready: %+v", status)
 	}
 	root := t.TempDir()
-	runner := webapphost.NewRunner(root, config.DefaultWebAppsConfig(), status.BackendPrerequisitesReady)
+	runner := webapphost.NewRunner(root, config.DefaultWebAppConfig(), status.BackendPrerequisitesReady)
 	_, err := runner.Start(context.Background(), webapp.RuntimeSpec{ManagementRoot: root, Manifest: webapp.Manifest{Backend: &webapp.Backend{}}})
 	code, _ := webapp.ErrorCode(err)
 	if code != "webapp_backend_unavailable" {

@@ -86,7 +86,7 @@ type QueryRuntime interface {
 type Dependencies struct {
 	RemoteMCP              *remotemcp.Service
 	Voice                  *voice.Service
-	WebApps                *webapp.Service
+	WebApp                 *webapp.Service
 	WebAppActions          webappgateway.Actions
 	WebAppHost             *webapphost.Status
 	Mailbox                *mailbox.Service
@@ -301,8 +301,8 @@ func New(deps Dependencies) (*Server, error) {
 		backgroundCancel:  backgroundCancel,
 	}
 	s.skillOrder = catalogorder.NewFileOrderStore(deps.Config.Paths.SkillsCenterDir)
-	if deps.Config.WebApps.Enabled && deps.WebApps != nil {
-		s.webAppGateway = webappgateway.New(deps.WebApps, deps.Config.WebApps)
+	if deps.Config.SingleWebApp() && deps.WebApp != nil {
+		s.webAppGateway = webappgateway.New(deps.WebApp, deps.Config.WebApp)
 		if tracker, ok := deps.WebAppActions.(interface{ SetRequestTracker(func() func()) }); ok {
 			tracker.SetRequestTracker(s.beginSingleRequest)
 		}
@@ -365,8 +365,8 @@ func (s *Server) SetChannelStatusProvider(provider ChannelStatusProvider) {
 // in-process callers such as the automation orchestrator, while intentionally
 // bypassing the outer HTTP auth gate enforced by ServeHTTP.
 
-// CloseWebApps releases local gateway listeners during application shutdown.
-func (s *Server) CloseWebApps() {
+// CloseWebApp releases local gateway listeners during application shutdown.
+func (s *Server) CloseWebApp() {
 	if s != nil && s.webAppGateway != nil {
 		s.webAppGateway.Close()
 	}

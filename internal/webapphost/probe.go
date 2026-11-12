@@ -1,4 +1,4 @@
-// Package webapphost owns Linux Compose WebApp process prerequisites.
+// Package webapphost owns single WebApp process prerequisites.
 // It does not infer deployment mode or start processes when the host is disabled.
 package webapphost
 
@@ -47,7 +47,6 @@ type Status struct {
 	BackendPrerequisitesReady bool    `json:"backendPrerequisitesReady"`
 	HostingAvailable          bool    `json:"hostingAvailable"`
 	StaticAvailable           bool    `json:"staticAvailable"`
-	MaxArchiveMiB             int     `json:"maxArchiveMiB,omitempty"`
 	Stage                     string  `json:"stage"`
 	Issues                    []Issue `json:"issues"`
 	Warnings                  []Issue `json:"warnings"`
@@ -65,7 +64,7 @@ type probeResult struct {
 }
 
 func Inspect(ctx context.Context) Status {
-	status := Status{Host: "compose", OS: runtime.GOOS, Arch: runtime.GOARCH, Stage: "foundation", Issues: []Issue{}, Warnings: []Issue{}}
+	status := Status{Host: "single", OS: runtime.GOOS, Arch: runtime.GOARCH, Stage: "foundation", Issues: []Issue{}, Warnings: []Issue{}}
 	issue := func(code string) { status.Issues = append(status.Issues, Issue{Code: code}) }
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		issue("webapp_backend_platform_unsupported")

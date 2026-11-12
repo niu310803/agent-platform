@@ -12,8 +12,8 @@ import (
 // secrets: the effective StateDir (connector credentials and the default
 // identity file), a separately configured identity file, and the document
 // preview records, whose share links open the previewed documents.
-// The WebApp directory holds code, install and authorization records and is
-// protected whether or not the WebApp host is enabled.
+// Retired WebApp installations may still hold authorization records. Their
+// legacy directory stays protected; startup never reads or adopts its contents.
 //
 // Under Desktop the runtime root also holds Desktop's own secrets partition
 // (<runtime root>/.desktop/secrets, the saved website passwords). Agents use
@@ -33,8 +33,8 @@ func PlatformProtectedPaths(cfg config.Config) []string {
 	if cfg.RuntimeMode == config.RuntimeModeDesktop && strings.TrimSpace(state) != "" {
 		paths = append(paths, filepath.Join(filepath.Dir(state), ".desktop", "secrets"))
 	}
-	if strings.TrimSpace(cfg.WebAppsCodeDir()) != "" {
-		paths = append(paths, cfg.WebAppsCodeDir())
+	if strings.TrimSpace(cfg.LegacyWebAppsCodeDir()) != "" {
+		paths = append(paths, cfg.LegacyWebAppsCodeDir())
 	}
 	if cfg.Paths.ChatsDir != "" {
 		for _, name := range []string{"mail.db", "mail.db-wal", "mail.db-shm"} {

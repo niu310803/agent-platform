@@ -38,7 +38,7 @@ type Runner interface {
 func (s *Service) Logs(id, stream, cursor string) (LogPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.records[id] == nil {
+	if s.recordFor(id) == nil {
 		return LogPage{}, fail("webapp_not_found", 404)
 	}
 	if stream != "stdout" && stream != "stderr" {
@@ -55,8 +55,8 @@ func (s *Service) Logs(id, stream, cursor string) (LogPage, error) {
 func (s *Service) instanceCheck(id, generation, policy string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	a := s.active[id]
-	if s.closed || s.closing || a == nil || a.generation != generation || a.ctx.Err() != nil || s.policies[id].Revision != policy || (a.state != "starting" && a.state != "running") {
+	a := s.active
+	if s.closed || s.closing || s.recordFor(id) == nil || a == nil || a.generation != generation || a.ctx.Err() != nil || s.policy.Revision != policy || (a.state != "starting" && a.state != "running") {
 		return fail("app_grant_required", 403)
 	}
 	return nil

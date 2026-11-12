@@ -1,70 +1,26 @@
 package server
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io/fs"
 	"net/http"
-	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"agent-platform/internal/chatresource"
-	"agent-platform/internal/config"
 	rt "agent-platform/internal/runtime/types"
 	"agent-platform/internal/webapp"
 	"agent-platform/internal/webappbridge"
+	"agent-platform/internal/webapptest"
 )
 
 func sdkApps(t *testing.T) (*webapp.Service, webapp.Entry) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("Compose host")
-	}
-	root := t.TempDir()
-	apps, err := webapp.Open(webapp.Options{Root: filepath.Join(root, "apps"), DataRoot: filepath.Join(root, "data"), Config: config.DefaultWebAppsConfig()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		apps.Close()
-		filepath.WalkDir(root, func(p string, d fs.DirEntry, e error) error {
-			if e == nil && d.IsDir() {
-				os.Chmod(p, 0700)
-			}
-			return nil
-		})
-	})
-	var b bytes.Buffer
-	z := zip.NewWriter(&b)
-	for name, value := range map[string]string{"webapp.json": `{"schemaVersion":2,"id":"webapp-0123456789abcdef","key":"sdk-test","label":"SDK","version":"1.0.0","target":"linux-x64","appConfig":{},"frontend":{"root":"frontend","index":"index.html"}}`, "frontend/index.html": "SDK"} {
-		f, _ := z.Create("webapp-0123456789abcdef/" + name)
-		f.Write([]byte(value))
-	}
-	z.Close()
-	u, err := apps.Upload(context.Background(), &b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e, err := apps.Install(context.Background(), webapp.InstallRequest{UploadID: u.UploadID, SHA256: u.SHA256})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, _ := apps.Configuration(e.ID)
-	c, err = apps.SavePolicy(e.ID, webapp.PolicyRequest{ExpectedRevision: c.Policy.Revision, AgentKey: executeTestAgent, Assistant: true, Artifacts: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e, err = apps.Start(context.Background(), e.ID, webapp.StateRequest{ExpectedRevision: c.Entry.Revision, ExpectedStateRevision: c.Entry.StateRevision})
-	if err != nil {
-		t.Fatal(err)
-	}
+	apps, e, _ := webapptest.Open(t, `{"schemaVersion":2,"id":"webapp-0123456789abcdef","key":"sdk-test","label":"SDK","version":"1.0.0","target":"any","hosting":"platform","minPlatformVersion":"0.5.0","copilot":{"agentKey":"`+executeTestAgent+`","references":[{"type":"skill","id":"mock-skill"}]},"frontend":{"root":"frontend","index":"index.html"}}`, map[string]string{"frontend/index.html": "SDK", "agents/" + executeTestAgent + "/agent.yml": "key: " + executeTestAgent})
 	return apps, e
 }
 func sdkAdapters(t *testing.T, f testFixture, apps *webapp.Service) *webappbridge.Adapters {

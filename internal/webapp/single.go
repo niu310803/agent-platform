@@ -11,18 +11,8 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-func (s *Service) codeRoot(id string) string {
-	if s.singleRoot != "" {
-		return s.singleRoot
-	}
-	return filepath.Join(s.root, id, "app")
-}
-func (s *Service) appDataRoot(id string) string {
-	if s.singleRoot != "" {
-		return s.dataRoot
-	}
-	return filepath.Join(s.dataRoot, id)
-}
+func (s *Service) codeRoot(_ string) string    { return s.singleRoot }
+func (s *Service) appDataRoot(_ string) string { return s.dataRoot }
 
 // ClaimSingleInstance must precede stores and generated catalog initialization.
 func ClaimSingleInstance(root string) (*os.File, error) {
@@ -139,8 +129,8 @@ func (s *Service) openSingle(o Options) (*Service, error) {
 	if err := writeJSON(metadata, record); err != nil {
 		return nil, err
 	}
-	s.records[m.ID] = &record
-	s.desired[m.ID] = Desired{SchemaVersion: 1, State: "running", Revision: randomID()}
+	s.record = &record
+	s.desired = Desired{SchemaVersion: 1, State: "running", Revision: randomID()}
 	policy := Policy{SchemaVersion: 1, Revision: randomID(), Skills: []string{}, Connectors: []ConnectorScope{}, ConnectPorts: []int{}}
 	if m.Copilot != nil {
 		policy.AgentKey = m.Copilot.AgentKey
@@ -153,8 +143,8 @@ func (s *Service) openSingle(o Options) (*Service, error) {
 	policyFile := filepath.Join(s.root, m.ID, "policy.json")
 	var previousPolicy Policy
 	if err := readJSON(policyFile, &previousPolicy); err == nil {
-		if err := validatePolicy(previousPolicy); err != nil {
-			return nil, err
+		if previousPolicy.SchemaVersion != 1 || !opaquePattern.MatchString(previousPolicy.Revision) || validatePolicy(previousPolicy) != nil {
+			return nil, fmt.Errorf("invalid single WebApp policy")
 		}
 		policy.ConnectPorts = previousPolicy.ConnectPorts
 	} else if !os.IsNotExist(err) {
@@ -163,7 +153,7 @@ func (s *Service) openSingle(o Options) (*Service, error) {
 	if err := writeJSON(policyFile, policy); err != nil {
 		return nil, err
 	}
-	s.policies[m.ID] = policy
+	s.policy = policy
 	configFile := filepath.Join(s.root, m.ID, "user-config.json")
 	if _, err := os.Stat(configFile); os.IsNotExist(err) {
 		if err = writeJSON(configFile, defaultUserConfig(m)); err != nil {

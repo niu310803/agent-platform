@@ -29,48 +29,37 @@ type BridgeGrant struct {
 }
 type BridgeFactory func(webapp.RuntimeSpec) (BridgeGrant, error)
 type Runner struct {
-	config config.WebAppsConfig
+	config config.WebAppConfig
 	root   string
 	ready  bool
 	node   string
-	single bool
 	mu     sync.Mutex
-	ports  map[int]bool
 	bridge BridgeFactory
 }
 
-func NewRunner(root string, cfg config.WebAppsConfig, ready bool) *Runner {
-	return &Runner{root: root, config: cfg, ready: ready, ports: map[int]bool{}}
+func NewRunner(root string, cfg config.WebAppConfig, ready bool) *Runner {
+	return &Runner{root: root, config: cfg, ready: ready}
 }
-func (r *Runner) SetRoot(root string) { r.root = root }
 func (r *Runner) SetNode(node string) {
 	if node == "" {
 		node = NodePath
 	}
 	r.node = node
-	r.single = true
 }
 func (r *Runner) SetBridge(factory BridgeFactory) { r.mu.Lock(); r.bridge = factory; r.mu.Unlock() }
 func (r *Runner) Ready() bool                     { return r.ready }
 func runtimeError(code string) error              { return &webapp.Error{Code: code, Status: 503} }
 func (r *Runner) reservePort() (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for port := r.config.Backend.PortStart; port <= r.config.Backend.PortEnd; port++ {
-		if r.ports[port] {
-			continue
-		}
-		l, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
-		if err != nil {
-			continue
-		}
-		l.Close()
-		r.ports[port] = true
-		return port, nil
+	l, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(r.config.Backend.Port)))
+	if err != nil {
+		return 0, err
 	}
-	return 0, runtimeError("webapp_backend_ports_exhausted")
+	port := l.Addr().(*net.TCPAddr).Port
+	if err := l.Close(); err != nil {
+		return 0, err
+	}
+	return port, nil
 }
-func (r *Runner) releasePort(port int) { r.mu.Lock(); delete(r.ports, port); r.mu.Unlock() }
 
 type supervisorStatus struct {
 	Event string `json:"event"`
@@ -144,12 +133,6 @@ func (r *Runner) Start(ctx context.Context, spec webapp.RuntimeSpec) (webapp.Pro
 	if err != nil {
 		return nil, err
 	}
-	keepPort := false
-	defer func() {
-		if !keepPort {
-			r.releasePort(port)
-		}
-	}()
 	tmp := filepath.Join(spec.ManagementRoot, ".generations", spec.Generation)
 	if err := os.MkdirAll(tmp, 0700); err != nil {
 		return nil, runtimeError("webapp_temporary_directory_failed")
@@ -235,12 +218,9 @@ func (r *Runner) Start(ctx context.Context, spec webapp.RuntimeSpec) (webapp.Pro
 	if r.node != "" {
 		node = r.node
 	}
-	readPaths := []string{spec.CodeRoot, spec.DataRoot, tmp, configFile}
-	if r.single {
-		readPaths = []string{filepath.Join(spec.CodeRoot, "webapp.json"), filepath.Join(spec.CodeRoot, spec.Manifest.Frontend.Root), spec.DataRoot, tmp, configFile}
-		if spec.Manifest.Backend != nil {
-			readPaths = append(readPaths, filepath.Join(spec.CodeRoot, "backend"))
-		}
+	readPaths := []string{filepath.Join(spec.CodeRoot, "webapp.json"), filepath.Join(spec.CodeRoot, spec.Manifest.Frontend.Root), spec.DataRoot, tmp, configFile}
+	if spec.Manifest.Backend != nil {
+		readPaths = append(readPaths, filepath.Join(spec.CodeRoot, "backend"))
 	}
 	nodeArgs := []string{"--permission", "--no-addons", "--max-old-space-size=" + strconv.Itoa(r.config.Backend.MaxOldSpaceSizeMB)}
 	for _, path := range readPaths {
@@ -248,11 +228,7 @@ func (r *Runner) Start(ctx context.Context, spec webapp.RuntimeSpec) (webapp.Pro
 	}
 	nodeArgs = append(nodeArgs, "--allow-fs-write="+spec.DataRoot, "--allow-fs-write="+tmp, filepath.Join(spec.CodeRoot, filepath.FromSlash(b.Command.Entry)))
 	nodeArgs = append(nodeArgs, b.Args...)
-	mode := "--run"
-	if r.single {
-		mode = "--run-single"
-	}
-	args := []string{mode, spec.CodeRoot, spec.DataRoot, tmp, configFile, strconv.Itoa(port), strconv.Itoa(bridgePort), strings.Join(ports, ","), strconv.Itoa(b.ShutdownTimeoutMS), "--", node}
+	args := []string{"--run-single", spec.CodeRoot, spec.DataRoot, tmp, configFile, strconv.Itoa(port), strconv.Itoa(bridgePort), strings.Join(ports, ","), strconv.Itoa(b.ShutdownTimeoutMS), "--", node}
 	args = append(args, nodeArgs...)
 	cmd := exec.Command(SupervisorPath, args...)
 	if runtime.GOOS != "linux" {
@@ -329,7 +305,6 @@ func (r *Runner) Start(ctx context.Context, spec webapp.RuntimeSpec) (webapp.Pro
 	controlRead.Close()
 	statusWrite.Close()
 	lease.Close()
-	keepPort = true
 	keepTmp = true
 	keepGrant = true
 	keepConfig = true
@@ -405,7 +380,6 @@ func (r *Runner) Start(ctx context.Context, spec webapp.RuntimeSpec) (webapp.Pro
 		p.result = webapp.ProcessExit{Code: code, Clean: clean, Reason: reason}
 		p.mu.Unlock()
 		if clean {
-			r.releasePort(port)
 			os.RemoveAll(tmp)
 			os.Remove(configFile)
 		}

@@ -7,27 +7,18 @@ import (
 	"testing"
 )
 
-func TestSettingsRevisionAndRevocationBoundary(t *testing.T) {
-	s, _ := fixtureService(t)
-	e := installPackage(t, s, "1.0.0", "")
+func TestSingleSettingsRevisionAndGenerationRevocation(t *testing.T) {
+	o := singleFixture(t)
+	s, err := Open(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err = s.RestoreDesired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e := s.Current()
 	c, err := s.Configuration(e.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	next, err := s.SavePolicy(e.ID, PolicyRequest{ExpectedRevision: c.Policy.Revision, Skills: []string{"builtin/example"}, ConnectPorts: []int{443}, Assistant: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = s.SavePolicy(e.ID, PolicyRequest{ExpectedRevision: c.Policy.Revision})
-	requireCode(t, err, "webapp_revision_conflict")
-	if next.Policy.Revision == c.Policy.Revision {
-		t.Fatal("policy revision not advanced")
-	}
-	_, err = s.SavePolicy(e.ID, PolicyRequest{ExpectedRevision: next.Policy.Revision, ConnectPorts: []int{0}})
-	requireCode(t, err, "webapp_policy_invalid")
-	_, err = s.SaveUserConfig(e.ID, UserConfigRequest{ExpectedRevision: c.ConfigRevision, Values: map[string]any{"unknown": "value"}})
-	requireCode(t, err, "webapp_user_config_invalid")
-	_, err = s.Start(context.Background(), e.ID, StateRequest{ExpectedRevision: e.Revision, ExpectedStateRevision: e.StateRevision})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,46 +27,67 @@ func TestSettingsRevisionAndRevocationBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope.Release()
-	updated, err := s.SavePolicy(e.ID, PolicyRequest{ExpectedRevision: next.Policy.Revision})
+	next, err := s.SavePolicy(e.ID, PolicyRequest{ExpectedRevision: c.Policy.Revision, Skills: []string{}, Connectors: []ConnectorScope{}, ConnectPorts: []int{443}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scope.Check() == nil || scope.Context.Err() == nil || updated.Entry.Generation == scope.Generation {
-		t.Fatal("policy did not revoke old generation")
+	if scope.Check() == nil || scope.Context.Err() == nil || next.Entry.Generation == scope.Generation {
+		t.Fatal("old generation not revoked")
+	}
+	if _, err = s.SavePolicy(e.ID, PolicyRequest{ExpectedRevision: c.Policy.Revision, Skills: []string{}, Connectors: []ConnectorScope{}}); err == nil {
+		t.Fatal("accepted stale policy")
+	}
+	if _, err = s.SavePolicy(e.ID, PolicyRequest{ExpectedRevision: next.Policy.Revision, Skills: []string{}, Connectors: []ConnectorScope{}, ConnectPorts: []int{0}}); err == nil {
+		t.Fatal("accepted invalid port")
+	}
+	if _, err = s.SavePolicy(e.ID, PolicyRequest{ExpectedRevision: next.Policy.Revision, AgentKey: "other"}); err == nil {
+		t.Fatal("changed package policy")
+	}
+	if _, err = s.SaveUserConfig(e.ID, UserConfigRequest{ExpectedRevision: c.ConfigRevision, Values: map[string]any{"unknown": "value"}}); err == nil {
+		t.Fatal("accepted unknown config")
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if s.policy.ConnectPorts[0] != 443 {
+		t.Fatal("lost port policy")
 	}
 }
-func TestReopenRejectsTamperedManifestRecordAndPolicy(t *testing.T) {
-	for _, which := range []string{"manifest", "policy"} {
+func TestSingleInvalidManagedRecordsFailClosed(t *testing.T) {
+	for _, which := range []string{"install.json", "policy.json", "user-config.json"} {
 		t.Run(which, func(t *testing.T) {
-			s, options := fixtureService(t)
-			e := installPackage(t, s, "1.0.0", "")
-			s.Close()
-			if which == "manifest" {
-				var r Record
-				if err := readJSON(filepath.Join(options.Root, e.ID, "install.json"), &r); err != nil {
-					t.Fatal(err)
-				}
-				r.Manifest.Label = "different"
-				if err := writeJSON(filepath.Join(options.Root, e.ID, "install.json"), r); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				var p Policy
-				readJSON(filepath.Join(options.Root, e.ID, "policy.json"), &p)
-				p.ConnectPorts = []int{0}
-				writeJSON(filepath.Join(options.Root, e.ID, "policy.json"), p)
+			o := singleFixture(t)
+			s, err := Open(o)
+			if err != nil {
+				t.Fatal(err)
 			}
-			requireUnavailable(t, options, e.ID, "webapp_installation_invalid")
+			e := s.Current()
+			if err = s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(filepath.Join(o.Root, e.ID, which), []byte("null"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			s, err = Open(o)
+			if err == nil {
+				defer s.Close()
+				if _, err = s.Configuration(e.ID); err == nil {
+					t.Fatal("accepted invalid record")
+				}
+			}
 		})
 	}
 }
-func TestConfigurationNullAndOversizeFailClosed(t *testing.T) {
-	s, options := fixtureService(t)
-	e := installPackage(t, s, "1.0.0", "")
-	if err := os.WriteFile(filepath.Join(options.Root, e.ID, "user-config.json"), []byte("null"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Configuration(e.ID); err == nil {
-		t.Fatal("null config accepted")
+func TestSingleRequiresExplicitPackageAndDoesNotScanInstallations(t *testing.T) {
+	o := singleFixture(t)
+	o.SingleRoot = ""
+	if s, err := Open(o); err == nil {
+		s.Close()
+		t.Fatal("accepted application collection root")
 	}
 }

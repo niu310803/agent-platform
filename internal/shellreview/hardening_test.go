@@ -231,7 +231,7 @@ func TestPreviewRecordsHardBlockAcrossLevels(t *testing.T) {
 	}
 }
 
-func TestWebAppsHardBlockAcrossLevelsWhenDisabled(t *testing.T) {
+func TestLegacyWebAppRecordsRemainProtectedAfterHostRemoval(t *testing.T) {
 	s := policyFixture(t)
 	webapps := filepath.Join(s.WorkspaceRoot, "webapps")
 	data := filepath.Join(s.WorkspaceRoot, "webapp-data", "test-app", "data.json")
@@ -249,11 +249,10 @@ func TestWebAppsHardBlockAcrossLevelsWhenDisabled(t *testing.T) {
 		}
 	}
 	cfg := config.Config{
-		WebApps: config.WebAppsConfig{Enabled: false},
 		Paths: config.PathsConfig{
-			StateDir:      filepath.Join(t.TempDir(), ".state"),
-			WebAppsDir:    webapps,
-			WebAppDataDir: filepath.Join(s.WorkspaceRoot, "webapp-data"),
+			StateDir:         filepath.Join(t.TempDir(), ".state"),
+			LegacyWebAppsDir: webapps,
+			WebAppDataDir:    filepath.Join(s.WorkspaceRoot, "webapp-data"),
 		},
 	}
 	s.ProtectedPaths = PlatformProtectedPaths(cfg)

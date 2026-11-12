@@ -34,7 +34,7 @@ type Config struct {
 	WebAppHost       WebAppHostMode
 	ListenAddress    string
 	WebAppNode       string
-	WebApps          WebAppsConfig
+	WebApp           WebAppConfig
 	Server           ServerConfig
 	Paths            PathsConfig
 	Agents           CatalogConfig
@@ -157,7 +157,7 @@ type PathsConfig struct {
 	RUPreviewsDir            string
 	PanDir                   string
 	SkillsCenterDir          string
-	WebAppsDir               string
+	LegacyWebAppsDir         string
 	WebAppDataDir            string
 }
 
@@ -798,7 +798,7 @@ func Load(optionValues ...LoadOptions) (Config, error) {
 	if err := validateRUAgentsDir(cfg.Paths); err != nil {
 		return Config{}, err
 	}
-	if err := cfg.validateWebApps(runtime.GOOS); err != nil {
+	if err := cfg.validateWebApp(runtime.GOOS); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil

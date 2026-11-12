@@ -91,8 +91,8 @@ func TestMainImportsTzdataForWindowsAutomationZones(t *testing.T) {
 }
 
 func TestParseConfigOptionsWebAppHost(t *testing.T) {
-	options, err := parseConfigOptions([]string{"--webapp-host=compose"})
-	if err != nil || options.WebAppHost != "compose" || options.RuntimeMode != "standalone" {
+	options, err := parseConfigOptions([]string{"--webapp-host=single"})
+	if err != nil || options.WebAppHost != "single" || options.RuntimeMode != "standalone" {
 		t.Fatalf("options=%+v err=%v", options, err)
 	}
 	options, err = parseConfigOptions(nil)

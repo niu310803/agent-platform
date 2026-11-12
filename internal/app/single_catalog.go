@@ -12,11 +12,8 @@ import (
 )
 
 func validateSingleCatalog(apps *webapp.Service, registry *catalog.FileRegistry, cfg config.Config) error {
-	entries := apps.List()
-	if len(entries) != 1 {
-		return fmt.Errorf("single WebApp requires one manifest")
-	}
-	scope, err := apps.Configuration(entries[0].ID)
+	entry := apps.Current()
+	scope, err := apps.Configuration(entry.ID)
 	if err != nil {
 		return err
 	}

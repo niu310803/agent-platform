@@ -12,7 +12,7 @@ import (
 func TestLogsBoundUnterminatedOutputAndRotate(t *testing.T) {
 	root := t.TempDir()
 	id := "webapp-0123456789abcdef"
-	cfg := config.DefaultWebAppsConfig()
+	cfg := config.DefaultWebAppConfig()
 	cfg.Logs.MaxSizeMB = 1
 	cfg.Logs.MaxFiles = 2
 	dir := filepath.Join(root, id, "logs")

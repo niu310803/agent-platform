@@ -93,7 +93,7 @@ docker run -d --name "$smoke_name" --platform "$PLATFORM" \
   --read-only --cap-drop ALL --security-opt no-new-privileges:true \
   --tmpfs /tmp:exec,mode=1777 --tmpfs /home/agent:exec,uid=10001,gid=10001,mode=0700 \
   -v "$smoke_configs:/opt/configs:ro" -v "$smoke_name:/opt/runtime" \
-  "$reference" --webapp-host=compose >/dev/null
+  "$reference" >/dev/null
 health=starting
 for _ in $(seq 1 30); do
   health="$(docker inspect --format '{{.State.Status}}/{{.State.Health.Status}}' "$smoke_name")"
@@ -138,7 +138,6 @@ echo "[release] saving $reference"
 docker image save "$reference" | gzip -n -9 >"$bundle_stage/$archive_name"
 
 cp "$IMAGE_ASSETS_DIR/compose.yml" "$bundle_stage/compose.yml"
-cp "$IMAGE_ASSETS_DIR/compose.webapps.yml" "$bundle_stage/compose.webapps.yml"
 cp "$IMAGE_ASSETS_DIR/load.sh" "$bundle_stage/load.sh"
 cp "$IMAGE_ASSETS_DIR/DEPLOY.md" "$bundle_stage/DEPLOY.md"
 sed "s/__VERSION__/$VERSION/" "$IMAGE_ASSETS_DIR/env.example" >"$bundle_stage/.env.example"

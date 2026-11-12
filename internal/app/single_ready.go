@@ -10,7 +10,8 @@ func (a *App) WaitSingleReady(ctx context.Context) error {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		for _, entry := range a.webapps.List() {
+		{
+			entry := a.webapps.Current()
 			switch entry.ObservedState {
 			case "running":
 				return nil

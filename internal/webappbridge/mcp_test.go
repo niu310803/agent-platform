@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-func TestMCPInvokeComposeScopeAndCapability(t *testing.T) {
+func TestMCPInvokeSingleScopeAndCapability(t *testing.T) {
 	apps, e := fixture(t)
 	upstream := sdk.NewServer(&sdk.Implementation{Name: "fixture", Version: "1"}, nil)
 	upstream.AddTool(&sdk.Tool{Name: "x", InputSchema: json.RawMessage(`{"type":"object"}`)}, func(context.Context, *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
@@ -40,7 +40,7 @@ func TestMCPInvokeComposeScopeAndCapability(t *testing.T) {
 	}
 	delete(input, "token")
 	// Exercise the page gateway: an anonymous request cannot borrow owner SSO.
-	cfg := config.DefaultWebAppsConfig()
+	cfg := config.DefaultWebAppConfig()
 	cfg.PlatformOrigin = "http://127.0.0.1:11948"
 	gateway := webappgateway.New(apps, cfg)
 	gateway.Actions = bridge

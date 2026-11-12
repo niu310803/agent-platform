@@ -32,7 +32,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Config.SingleWebApp() && r.URL.Path != "/api/webapp/status" && r.URL.Path != "/healthz" && r.URL.Path != "/ws" {
 		defer s.beginSingleRequest()()
 	}
-	if s.deps.Config.WebApps.Enabled && s.handleWebAppHostBoundary(w, r) {
+	if s.deps.Config.SingleWebApp() && s.handleWebAppHostBoundary(w, r) {
 		return
 	}
 	startedAt := time.Now()
@@ -220,7 +220,7 @@ func chatSourceFromContext(ctx context.Context) string {
 }
 
 func (s *Server) routes() {
-	if s.deps.Config.WebApps.Enabled {
+	if s.deps.Config.SingleWebApp() {
 		s.router.HandleFunc("/api/admin/webapps/host", s.method(http.MethodGet, s.handleWebAppHost))
 		s.router.HandleFunc("/api/admin/webapps", s.handleWebAppAdmin)
 		s.router.HandleFunc("/api/admin/webapps/", s.handleWebAppAdmin)

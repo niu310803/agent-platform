@@ -216,7 +216,7 @@ Platform 运行形态只由 `--runtime-mode=standalone|desktop` 指定，默认 
 
 应用工程的通用检查和 ZIP 打包由 `agent-platform webapp check` / `agent-platform webapp pack` 提供，复用共享清单合同，包根直接保留前后端、platform 资源和清单，不增加应用名包装层；用法见 [离线检查与打包](docs/WebApp独立实例.md#离线检查与打包)。
 
-Linux Compose 的 WebApp 托管由 `--webapp-host=compose` 与 `runtime.yml` 的 `webapps.enabled` 双重选择，默认关闭，不增加 RuntimeMode，不影响 Desktop。已实现 ZIP 安装事务、每应用本地端口、owner 管理、票据/会话与 CSRF、受限 Node 监督及 HTTP/WS/SSE、更新回退与 SDK 连接器/助理/技能/产物适配。原生 Linux 候选通过完整镜像构建、Compose 故障恢复、资源压力和浏览器验证；生产实例未切换。当前仅提供宿主机 `127.0.0.1` 访问，独立域名及 DNS/TLS/nginx 按用户要求延期。范围、启用方法和限制见 [WebApp 托管](docs/WebApp托管.md)。
+Desktop 继续支持多个 WebApp，共享资源模式复用主 Platform，独立模式使用应用专属 Platform 和环境。普通 Platform 独立部署对接 agent-webclient；已移除其 Compose 多应用安装、托管和应用管理列表。旧 `--webapp-host=compose` 与 `runtime.yml` 的 `webapps:` 配置会报错，已有应用目录不会自动迁移或删除。容器部署仍使用普通 Compose，但不再发布 WebApp 端口池。
 
 外部连接器原包安装在 `<AP_RUNTIME_DIR>/connectors-center/<id>`；启动和普通管理命令忽略旧 connectors/connector-state 及旧包根状态，不自动迁移；内置原包由 Platform 随包提供，不可修改或删除。Agent 挂载后，两类包统一组装到 `<AP_RUNTIME_DIR>/ru-connectors/<id>/<contentDigest>`，持久化授权状态保存在凭据目录 `.state/connectors/<id>/`。两类连接器统一由 Agent 的 `connectorConfig.connectors` 挂载；挂载自动增加本 Agent 运行包 bin PATH、导入全部技能元数据并接入 MCP 工具，同时授权运行包内 CLI 的全部子命令和参数，在所有 accessLevel 下免除入口执行审批；`view.json` 声明拦截的命令仍经 VIEW 表单人工审阅，需要凭据时仅支持已验证的直接子进程；技能正文和资源随包复制，从本 Agent 的 `@connectors/<id>/skills/...` 读取，不再重复放进同级 skills 目录；skillId 使用原始技能名，不添加连接器前缀，同一 Agent 内技能重名时返回冲突诊断。包允许 `bin/libs`，连接器技能不能被 `references` 中的 skill 引用 选中。`dbx/httpx` 的清单和完整技能源码位于相邻 `agent-platform-connectors/{dbx,httpx}/connector/`，由各项目与二进制一起打包，Platform 锁定并校验完整包；旧 `registries/mcp-servers` 目录直接忽略，不影响启动；不提供旧目录迁移，连接器按当前格式重新安装，Agent 挂载使用新字段。MCP 的 HTTP/stdio 优先请求 `2025-11-25`，兼容 SDK 支持的 `2025-06-18`、`2025-03-26` 和 `2024-11-05`，并保持后台 tool sync。外部包支持通过 `DELETE /api/admin/connectors/detail?id=<id>` 删除；无活动运行占用时自动解除 Agent 源码挂载；有 Run／Terminal 占用则拒绝删除，需用户自行结束后重试，同步清空该连接器的全部本地授权、CLI 配置与数据和托管安装，重载失败恢复原包和状态；重新导入需重新准备和登录。HTTP MCP 可通过 `POST /api/admin/connectors/import-mcp` 按地址生成配置包，支持 MCP OAuth、无需认证、OneID 与手工 Token（Bearer、API Key 或 HTTP Basic 账号密码），按 URL 或显式 ID 保存目录，同 ID 重复导入不覆盖。ZIP 导入后异步 CLI 准备（有 bin 跳过 init）、独立准备状态与登录凭据、MCP OAuth PKCE 与令牌刷新见 [连接器安装与授权](./docs/连接器安装与授权.md)；包结构与旧目录处理见 [连接器](./docs/连接器.md)，协议细节见 [MCP与工具交互](./docs/MCP与工具交互.md)。
 
@@ -452,4 +452,4 @@ docker compose logs -f
 
 Query 与 steer 的技能、知识库和对话统一使用 references；对话仅传 chatId，通过 task-control 按需读取。旧选择字段硬切，详见 [引用协议](docs/引用协议.md)。
 
-按 URL 直接调用远程 MCP 的受信 WebApp 入口为 `POST /api/mcp/invoke`，无需安装连接器；HTTP 宿主鉴权、Compose SDK 与 SSO 供应边界见 [远程 MCP 调用](docs/远程MCP调用.md)。
+按 URL 直接调用远程 MCP 的受信 WebApp 入口为 `POST /api/mcp/invoke`，无需安装连接器；HTTP 宿主鉴权、独立实例 SDK 与 SSO 供应边界见 [远程 MCP 调用](docs/远程MCP调用.md)。

@@ -1,17 +1,14 @@
 package webappbridge
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,64 +20,27 @@ import (
 	"agent-platform/internal/connectorops"
 	"agent-platform/internal/webapp"
 	"agent-platform/internal/webappgateway"
+	"agent-platform/internal/webapptest"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func fixture(t *testing.T) (*webapp.Service, webapp.Entry) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("Linux Compose runtime")
-	}
-	root := t.TempDir()
-	cfg := config.DefaultWebAppsConfig()
-	s, err := webapp.Open(webapp.Options{Root: filepath.Join(root, "webapps"), DataRoot: filepath.Join(root, "data"), Config: cfg})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		s.Close()
-		_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err == nil && d.IsDir() {
-				return os.Chmod(path, 0700)
-			}
-			return err
-		})
-	})
-	e := installFixture(t, s, "1.0.0", "")
+	s, e, _ := webapptest.Open(t, `{"schemaVersion":2,"id":"webapp-0123456789abcdef","key":"bridge-app","label":"Bridge","version":"1.0.0","target":"any","hosting":"platform","minPlatformVersion":"0.5.0","appConfig":{"hello":"world"},"frontend":{"root":"frontend","index":"index.html"}}`, map[string]string{"frontend/index.html": "<h1>bridge</h1>"})
 	return s, e
 }
-func installFixture(t *testing.T, s *webapp.Service, version, expected string) webapp.Entry {
-	t.Helper()
-	var out bytes.Buffer
-	z := zip.NewWriter(&out)
-	for name, value := range map[string]string{"webapp.json": `{"schemaVersion":2,"id":"webapp-0123456789abcdef","key":"bridge-app","label":"Bridge","version":"` + version + `","target":"linux-x64","appConfig":{"hello":"world"},"frontend":{"root":"frontend","index":"index.html"}}`, "frontend/index.html": "<h1>bridge</h1>"} {
-		f, _ := z.Create("webapp-0123456789abcdef/" + name)
-		f.Write([]byte(value))
-	}
-	z.Close()
-	u, err := s.Upload(context.Background(), &out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e, err := s.Install(context.Background(), webapp.InstallRequest{UploadID: u.UploadID, SHA256: u.SHA256, ExpectedRevision: expected})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if e.DesiredState != "running" {
-		e, err = s.Start(context.Background(), e.ID, webapp.StateRequest{ExpectedRevision: e.Revision, ExpectedStateRevision: e.StateRevision})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	return e
-}
-func call(t *testing.T, b *Service, s *webapp.Service, id, action string, args any) *httptest.ResponseRecorder {
+func call(t *testing.T, b *Service, s *webapp.Service, id, action string, args any, grants ...webapp.ConnectorScope) *httptest.ResponseRecorder {
 	t.Helper()
 	scope, err := s.Acquire(id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer scope.Release()
+	// Exercise connectorops with a trusted internal scope; single management
+	// cannot change the package's immutable connector permissions.
+	if len(grants) > 0 {
+		scope.Policy.Connectors = grants
+	}
 	body, _ := json.Marshal(map[string]any{"action": action, "args": args})
 	r := httptest.NewRequest("POST", "http://app/__desktop/actions/call", bytes.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -88,7 +48,7 @@ func call(t *testing.T, b *Service, s *webapp.Service, id, action string, args a
 	b.ServeHTTP(w, r, scope)
 	return w
 }
-func TestConnectorScopeKeepsDurableReceiptAcrossGenerationAndUpdate(t *testing.T) {
+func TestConnectorScopeKeepsDurableReceiptAcrossGeneration(t *testing.T) {
 	s, e := fixture(t)
 	var count atomic.Int32
 	upstream := sdk.NewServer(&sdk.Implementation{Name: "fixture", Version: "1"}, nil)
@@ -114,14 +74,9 @@ func TestConnectorScopeKeepsDurableReceiptAcrossGenerationAndUpdate(t *testing.T
 	if w := call(t, bridge, s, e.ID, "connector.invoke", input); w.Code != 403 {
 		t.Fatal("implicit grant", w.Code, w.Body.String())
 	}
-	c, _ := s.Configuration(e.ID)
-	c, err := s.SavePolicy(e.ID, webapp.PolicyRequest{ExpectedRevision: c.Policy.Revision, Connectors: []webapp.ConnectorScope{{ConnectorID: "demo", Adapter: "mcp"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e = c.Entry
+	grant := webapp.ConnectorScope{ConnectorID: "demo", Adapter: "mcp"}
 	for attempt := 0; attempt < 2; attempt++ {
-		w := call(t, bridge, s, e.ID, "connector.invoke", input)
+		w := call(t, bridge, s, e.ID, "connector.invoke", input, grant)
 		if w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
 		}
@@ -129,7 +84,11 @@ func TestConnectorScopeKeepsDurableReceiptAcrossGenerationAndUpdate(t *testing.T
 			t.Fatal("side effect replayed")
 		}
 		if attempt == 0 {
-			e = installFixture(t, s, "2.0.0", e.Revision)
+			var err error
+			e, err = s.Restart(context.Background(), e.ID, webapp.StateRequest{ExpectedRevision: e.Revision, ExpectedStateRevision: e.StateRevision})
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	bad := map[string]any{}
@@ -137,7 +96,7 @@ func TestConnectorScopeKeepsDurableReceiptAcrossGenerationAndUpdate(t *testing.T
 		bad[key] = value
 	}
 	bad["deviceId"] = "forged"
-	if w := call(t, bridge, s, e.ID, "connector.invoke", bad); w.Code != 400 {
+	if w := call(t, bridge, s, e.ID, "connector.invoke", bad, grant); w.Code != 400 {
 		t.Fatal("accepted identity override")
 	}
 	bad = map[string]any{}
@@ -145,7 +104,7 @@ func TestConnectorScopeKeepsDurableReceiptAcrossGenerationAndUpdate(t *testing.T
 		bad[key] = value
 	}
 	bad["arguments"] = map[string]any{"changed": true}
-	if w := call(t, bridge, s, e.ID, "connector.invoke", bad); w.Code != 409 || !strings.Contains(w.Body.String(), "idempotency_conflict") {
+	if w := call(t, bridge, s, e.ID, "connector.invoke", bad, grant); w.Code != 409 || !strings.Contains(w.Body.String(), "idempotency_conflict") {
 		t.Fatal("changed side effect", w.Code, w.Body.String())
 	}
 }
@@ -215,7 +174,7 @@ func TestPageBridgeRequiresCookieOriginAndCSRFAndMatchesSDKConfigShape(t *testin
 	s, e := fixture(t)
 	b := New(Options{Apps: s, Owner: "owner"})
 	defer b.Close()
-	cfg := config.DefaultWebAppsConfig()
+	cfg := config.DefaultWebAppConfig()
 	cfg.PlatformOrigin = "http://127.0.0.1:11948"
 	g := webappgateway.New(s, cfg)
 	g.Actions = b

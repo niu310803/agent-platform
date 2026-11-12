@@ -191,7 +191,7 @@ cleanup:
     return 0;
 }
 
-/* --run uses FD 3 (parent-liveness pipe), FD 4 (private status pipe), and
+/* --run-single uses FD 3 (parent-liveness pipe), FD 4 (private status pipe), and
  * FD 5 (exclusive generation lock). None survive exec into application Node.
  * A watcher and a subreaper supervise one another: killing either one leaves
  * the other able to reap the Node tree. Container init is the final boundary.
@@ -285,7 +285,6 @@ static int restrict_node(char **argv) {
         (1ULL << 7) | (1ULL << 8) | (1ULL << 9) | (1ULL << 10) |
         (1ULL << 12) | (1ULL << 13) | (1ULL << 14);
     int result = -1;
-    if (strcmp(argv[1], "--run-single") == 0) {
     char item[PATH_MAX];
     const char *items[] = {"webapp.json", "frontend", "backend", NULL};
     for (int i = 0; items[i]; i++) {
@@ -294,7 +293,6 @@ static int restrict_node(char **argv) {
         if (lstat(item, &st) < 0) { if (errno == ENOENT && i == 2) continue; goto done; }
         if (S_ISLNK(st.st_mode) || add_path(rules, item, S_ISDIR(st.st_mode) ? read : FS_READ_FILE) < 0) goto done;
     }
-    } else if (add_path(rules, argv[2], read) < 0) goto done;
     if (add_path(rules, argv[3], write) < 0 ||
         add_path(rules, argv[4], write) < 0 || add_path(rules, argv[5], FS_READ_FILE) < 0 ||
         add_path(rules, "/opt/node/bin/node", FS_READ_FILE | 1ULL) < 0) goto done;
@@ -378,10 +376,10 @@ static int run_application(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-    if (argc >= 2 && (strcmp(argv[1], "--run") == 0 || strcmp(argv[1], "--run-single") == 0)) return run_application(argc, argv);
+    if (argc >= 2 && strcmp(argv[1], "--run-single") == 0) return run_application(argc, argv);
     if (argc == 2 && strcmp(argv[1], "--probe") == 0) return probe();
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
-        puts("webapp-supervisor protocol=3");
+        puts("webapp-supervisor protocol=4");
         return 0;
     }
     fputs("usage: webapp-supervisor --probe|--version\n", stderr);

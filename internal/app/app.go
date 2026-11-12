@@ -131,13 +131,10 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 		}
 	}()
 	var webappHostStatus *webapphost.Status
-	if cfg.WebApps.Enabled && (!cfg.SingleWebApp() || hostEnv.GOOS == "linux") {
+	if cfg.SingleWebApp() && hostEnv.GOOS == "linux" {
 		if err := webapphost.ProtectPlatform(); err != nil {
 			return nil, err
 		}
-		status := webapphost.Inspect(rootCtx)
-		webappHostStatus = &status
-		log.Printf("WebApp prerequisites: node=%t supervisor=%t isolation=%t abi=%d", status.NodeReady, status.SupervisorReady, status.IsolationReady, status.LandlockABI)
 	}
 	if cfg.SingleWebApp() {
 		status, err := webapphost.InspectSingle(rootCtx, cfg.WebAppNode)
@@ -559,17 +556,11 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 	var appBridge *webappbridge.Service
 	remoteMCP := &remotemcp.Service{SsoIDTokenFile: cfg.SsoIdTokenFile}
 	cleanupWebapps := true
-	if cfg.WebApps.Enabled {
-		webappRunner = webapphost.NewRunner(cfg.Paths.WebAppsDir, cfg.WebApps, webappHostStatus != nil && webappHostStatus.BackendPrerequisitesReady)
-		options := webapp.Options{Root: cfg.Paths.WebAppsDir, DataRoot: cfg.Paths.WebAppDataDir, Config: cfg.WebApps, Runner: webappRunner}
-		if cfg.SingleWebApp() {
-			options.Root = filepath.Join(cfg.Paths.StateDir, "webapps")
-			options.SingleRoot = filepath.Dir(cfg.Paths.AgentsDir)
-			options.PlatformVersion = platform.Version()
-			options.InstanceLock = singleLock
-			webappRunner.SetNode(cfg.WebAppNode)
-			webappRunner.SetRoot(options.Root)
-		}
+	if cfg.SingleWebApp() {
+		stateRoot := filepath.Join(cfg.Paths.StateDir, "webapps")
+		webappRunner = webapphost.NewRunner(stateRoot, cfg.WebApp, webappHostStatus != nil && webappHostStatus.BackendPrerequisitesReady)
+		webappRunner.SetNode(cfg.WebAppNode)
+		options := webapp.Options{Root: stateRoot, SingleRoot: filepath.Dir(cfg.Paths.AgentsDir), DataRoot: cfg.Paths.WebAppDataDir, Config: cfg.WebApp, Runner: webappRunner, PlatformVersion: platform.Version(), InstanceLock: singleLock}
 		webapps, err = webapp.Open(options)
 		if err != nil {
 			return nil, fmt.Errorf("initialize WebApp storage: %w", err)
@@ -589,10 +580,7 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 		}
 	}
 	if webapps != nil {
-		bridgeRoot := filepath.Join(cfg.Paths.WebAppsDir, webapp.SDKStateDir)
-		if cfg.SingleWebApp() {
-			bridgeRoot = filepath.Join(cfg.Paths.StateDir, "webapps", webapp.SDKStateDir)
-		}
+		bridgeRoot := filepath.Join(cfg.Paths.StateDir, "webapps", webapp.SDKStateDir)
 		adapters := webappbridge.NewAdapters(webappbridge.AdapterOptions{Apps: webapps, Runtime: runtimeService, Registry: registry, Chats: chatStore, Artifacts: chatResourceService, Owner: cfg.Auth.AllowedSubjects[0], Root: bridgeRoot})
 		appBridge = webappbridge.New(webappbridge.Options{RemoteMCP: remoteMCP, Apps: webapps, Owner: cfg.Auth.AllowedSubjects[0], Connectors: &connectorops.Service{Auth: connectorAuth, Sources: cfg.Paths.ConnectorSources()}, Actions: adapters.Actions()})
 		if err := appBridge.ListenInternal(); err != nil {
@@ -610,7 +598,7 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 	}()
 	srv, err = server.New(server.Dependencies{
 		Voice:             voiceService,
-		WebApps:           webapps,
+		WebApp:            webapps,
 		WebAppActions:     appBridge,
 		BackgroundContext: backgroundCtx,
 		Config:            cfg,
@@ -764,7 +752,7 @@ func New(rootCtx context.Context, configOptions ...config.LoadOptions) (*App, er
 	log.Printf("app dependencies initialized in %s", startupElapsed(appInitStartedAt))
 	if webapps != nil {
 		if err := webapps.RestoreDesired(backgroundCtx); err != nil {
-			return nil, fmt.Errorf("restore static WebApps: %w", err)
+			return nil, fmt.Errorf("restore static WebApp: %w", err)
 		}
 	}
 	if memoryWorker != nil {
@@ -808,11 +796,11 @@ func (a *App) Close() error {
 		return nil
 	}
 	if a.Router != nil {
-		a.Router.CloseWebApps()
+		a.Router.CloseWebApp()
 	}
 	if a.webapps != nil {
 		if err := a.webapps.Close(); err != nil {
-			log.Printf("close WebApps: %v", err)
+			log.Printf("close WebApp: %v", err)
 		}
 	}
 	if a.webappBridge != nil {

@@ -28,7 +28,7 @@ ARG TARGETOS
 ARG TARGETARCH
 COPY build/builtins/${TARGETOS}-${TARGETARCH}/ /
 
-# Linux Compose WebApp prerequisites. This is separate from the CGO-free Go
+# Single WebApp Linux prerequisites. This is separate from the CGO-free Go
 # binary and never enters the macOS/Windows program distribution.
 # Reuse the pinned Bookworm compiler image; avoid downloading a second GCC
 # toolchain solely for this helper. Only the resulting artifacts ship.

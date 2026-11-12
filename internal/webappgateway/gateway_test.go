@@ -1,69 +1,24 @@
 package webappgateway
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"agent-platform/internal/config"
 	"agent-platform/internal/webapp"
+	"agent-platform/internal/webapptest"
 )
 
 func gatewayFixture(t *testing.T) (*Gateway, *webapp.Service, webapp.Entry) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("Linux Compose hosting")
-	}
-	root := t.TempDir()
-	cfg := config.DefaultWebAppsConfig()
+	cfg := config.DefaultWebAppConfig()
 	cfg.PlatformOrigin = "https://demo.platform.example.com"
-	cfg.ContentDomain = "apps.example.net"
-	cfg.InstanceSlug = "demo"
-	s, err := webapp.Open(webapp.Options{Root: filepath.Join(root, "webapps"), DataRoot: filepath.Join(root, "data"), Config: cfg})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		s.Close()
-		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err == nil && d.IsDir() {
-				return os.Chmod(p, 0700)
-			}
-			return err
-		})
-	})
-	var out bytes.Buffer
-	z := zip.NewWriter(&out)
-	for name, value := range map[string]string{
-		"webapp-0123456789abcdef/webapp.json":         `{"schemaVersion":2,"id":"webapp-0123456789abcdef","key":"static-app","label":"Static app","version":"1.0.0","target":"linux-x64","appConfig":{"publicValue":"hello"},"userConfig":{"fields":[{"type":"text","name":"title","label":"Title","maxLength":64,"default":"hello"}]},"frontend":{"root":"frontend","index":"index.html","routeConfig":{"navigationFallback":"index.html"}}}`,
-		"webapp-0123456789abcdef/frontend/index.html": "<!doctype html><h1>Private app</h1>", "webapp-0123456789abcdef/backend/private.txt": "private backend file",
-	} {
-		f, _ := z.Create(name)
-		_, _ = f.Write([]byte(value))
-	}
-	z.Close()
-	u, err := s.Upload(context.Background(), &out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry, err := s.Install(context.Background(), webapp.InstallRequest{UploadID: u.UploadID, SHA256: u.SHA256})
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry, err = s.Start(context.Background(), entry.ID, webapp.StateRequest{ExpectedRevision: entry.Revision, ExpectedStateRevision: entry.StateRevision})
-	if err != nil {
-		t.Fatal(err)
-	}
+	s, entry, _ := webapptest.Open(t, `{"schemaVersion":2,"id":"webapp-0123456789abcdef","key":"static-app","label":"Static app","version":"1.0.0","hosting":"platform","minPlatformVersion":"0.5.0","target":"any","appConfig":{"publicValue":"hello"},"userConfig":{"fields":[{"type":"text","name":"title","label":"Title","maxLength":64,"default":"hello"}]},"frontend":{"root":"frontend","index":"index.html","routeConfig":{"navigationFallback":"index.html"}}}`, map[string]string{"frontend/index.html": "<!doctype html><h1>Private app</h1>", "backend/private.txt": "private backend file"})
 	g := New(s, cfg)
 	t.Cleanup(g.Close)
 	if err := g.ensureListener(entry.ID); err != nil {

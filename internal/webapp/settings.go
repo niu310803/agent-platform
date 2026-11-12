@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -57,7 +58,7 @@ func (s *Service) readUserConfig(id string) (map[string]any, string, error) {
 		return nil, "", fail("webapp_user_config_invalid", 400)
 	}
 	known := map[string]bool{}
-	if config := s.records[id].Manifest.UserConfig; config != nil {
+	if config := s.recordFor(id).Manifest.UserConfig; config != nil {
 		for _, field := range config.Fields {
 			known[field.Name] = true
 		}
@@ -68,7 +69,7 @@ func (s *Service) readUserConfig(id string) (map[string]any, string, error) {
 		}
 	}
 	digest := sha256.Sum256(raw)
-	for key, value := range defaultUserConfig(s.records[id].Manifest) {
+	for key, value := range defaultUserConfig(s.recordFor(id).Manifest) {
 		if _, ok := values[key]; !ok {
 			values[key] = value
 		}
@@ -81,7 +82,7 @@ func (s *Service) Configuration(id string) (Configuration, error) {
 	if err := s.mutationError(); err != nil {
 		return Configuration{}, err
 	}
-	r := s.records[id]
+	r := s.recordFor(id)
 	if r == nil {
 		return Configuration{}, fail("webapp_not_found", 404)
 	}
@@ -89,7 +90,7 @@ func (s *Service) Configuration(id string) (Configuration, error) {
 	if err != nil {
 		return Configuration{}, err
 	}
-	return Configuration{Entry: s.entry(r), Manifest: r.Manifest, Policy: s.policies[id], UserConfig: values, ConfigRevision: revision}, nil
+	return Configuration{Entry: s.entry(r), Manifest: r.Manifest, Policy: s.policy, UserConfig: values, ConfigRevision: revision}, nil
 }
 func validateUserValues(m Manifest, values map[string]any) error {
 	bad := func() error { return fail("webapp_user_config_invalid", 400) }
@@ -160,11 +161,11 @@ func (s *Service) SaveUserConfig(id string, request UserConfigRequest) (Configur
 	if !idPattern.MatchString(id) {
 		return Configuration{}, fail("webapp_not_found", 404)
 	}
-	control := s.control(id)
+	control := &s.controlMu
 	control.Lock()
 	defer control.Unlock()
 	s.mu.Lock()
-	r := s.records[id]
+	r := s.recordFor(id)
 	if err := s.mutationError(); err != nil {
 		s.mu.Unlock()
 		return Configuration{}, err
@@ -173,7 +174,7 @@ func (s *Service) SaveUserConfig(id string, request UserConfigRequest) (Configur
 		s.mu.Unlock()
 		return Configuration{}, fail("webapp_not_found", 404)
 	}
-	resume := s.desired[id].State == "running"
+	resume := s.desired.State == "running"
 	_, revision, err := s.readUserConfig(id)
 	if err != nil {
 		s.mu.Unlock()
@@ -190,7 +191,7 @@ func (s *Service) SaveUserConfig(id string, request UserConfigRequest) (Configur
 	err = writeJSON(filepath.Join(s.root, id, "user-config.json"), request.Values)
 	restart := resume && r.Manifest.Backend != nil
 	if err == nil && restart {
-		if a := s.active[id]; a != nil {
+		if a := s.active; a != nil {
 			a.cancel()
 			a.stop()
 		}
@@ -207,20 +208,10 @@ func (s *Service) SaveUserConfig(id string, request UserConfigRequest) (Configur
 	return s.Configuration(id)
 }
 func (s *Service) SavePolicy(id string, request PolicyRequest) (Configuration, error) {
-	if s.singleRoot != "" {
-		s.mu.Lock()
-		old := s.policies[id]
-		s.mu.Unlock()
-		before, _ := json.Marshal([]any{old.AgentKey, old.Skills, old.Connectors, old.Assistant, old.Artifacts})
-		after, _ := json.Marshal([]any{request.AgentKey, request.Skills, request.Connectors, request.Assistant, request.Artifacts})
-		if string(before) != string(after) {
-			return Configuration{}, fail("webapp_package_policy_readonly", 403)
-		}
-	}
 	if !idPattern.MatchString(id) {
 		return Configuration{}, fail("webapp_not_found", 404)
 	}
-	control := s.control(id)
+	control := &s.controlMu
 	control.Lock()
 	defer control.Unlock()
 	s.mu.Lock()
@@ -228,12 +219,17 @@ func (s *Service) SavePolicy(id string, request PolicyRequest) (Configuration, e
 		s.mu.Unlock()
 		return Configuration{}, err
 	}
-	if s.records[id] == nil {
+	if s.recordFor(id) == nil {
 		s.mu.Unlock()
 		return Configuration{}, fail("webapp_not_found", 404)
 	}
-	resume := s.desired[id].State == "running"
-	if s.policies[id].Revision != request.ExpectedRevision {
+	old := s.policy
+	if old.AgentKey != request.AgentKey || !slices.Equal(old.Skills, request.Skills) || !slices.Equal(old.Connectors, request.Connectors) || old.Assistant != request.Assistant || old.Artifacts != request.Artifacts {
+		s.mu.Unlock()
+		return Configuration{}, fail("webapp_package_policy_readonly", 403)
+	}
+	resume := s.desired.State == "running"
+	if s.policy.Revision != request.ExpectedRevision {
 		s.mu.Unlock()
 		return Configuration{}, fail("webapp_revision_conflict", 409)
 	}
@@ -244,9 +240,9 @@ func (s *Service) SavePolicy(id string, request PolicyRequest) (Configuration, e
 	p := Policy{SchemaVersion: 1, Revision: randomID(), AgentKey: strings.TrimSpace(request.AgentKey), Skills: append([]string{}, request.Skills...), Connectors: append([]ConnectorScope{}, request.Connectors...), Assistant: request.Assistant, Artifacts: request.Artifacts, ConnectPorts: append([]int{}, request.ConnectPorts...)}
 	err := writeJSON(filepath.Join(s.root, id, "policy.json"), p)
 	if err == nil {
-		s.policies[id] = p
+		s.policy = p
 		if resume {
-			if a := s.active[id]; a != nil {
+			if a := s.active; a != nil {
 				a.cancel()
 				a.stop()
 			}

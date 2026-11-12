@@ -34,7 +34,7 @@ func defaultConfig(options LoadOptions) Config {
 		RUPreviewsDir:       filepath.Join(runtimeRoot, "ru-previews"),
 		PanDir:              filepath.Join(runtimeRoot, "pan"),
 		SkillsCenterDir:     filepath.Join(runtimeRoot, "skills-center"),
-		WebAppsDir:          filepath.Join(runtimeRoot, "webapps"),
+		LegacyWebAppsDir:    filepath.Join(runtimeRoot, "webapps"),
 		WebAppDataDir:       filepath.Join(runtimeRoot, "webapp-data"),
 	}
 	return Config{
@@ -45,7 +45,7 @@ func defaultConfig(options LoadOptions) Config {
 		SsoIdTokenFile:  options.SsoIdTokenFile,
 		RuntimeMode:     runtimeMode,
 		WebAppHost:      webappHost,
-		WebApps:         DefaultWebAppsConfig(),
+		WebApp:          DefaultWebAppConfig(),
 		Server:          ServerConfig{Port: "8080"},
 		Paths:           paths,
 		Agents:          CatalogConfig{ExternalDir: paths.AgentsDir},
@@ -321,7 +321,7 @@ func (c *Config) normalize(configRoot string) error {
 	c.Paths.StateDir = stateDir
 	for name, value := range map[string]*string{
 		"connectors-center-dir": &c.Paths.ConnectorsCenterDir,
-		"webapps-dir":           &c.Paths.WebAppsDir,
+		"webapps-dir":           &c.Paths.LegacyWebAppsDir,
 		"webapp-data-dir":       &c.Paths.WebAppDataDir,
 	} {
 		if strings.TrimSpace(*value) == "" {

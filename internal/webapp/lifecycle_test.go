@@ -6,65 +6,77 @@ import (
 	"time"
 )
 
-func TestStaticStopDrainsLeasesBeforeAllowingPackageReplacement(t *testing.T) {
-	s, _ := fixtureService(t)
-	entry := installPackage(t, s, "1.0.0", "")
-	entry, err := s.Start(context.Background(), entry.ID, StateRequest{ExpectedRevision: entry.Revision, ExpectedStateRevision: entry.StateRevision})
+func TestSingleStopDrainsLeasesAndRejectsOtherApplication(t *testing.T) {
+	o := singleFixture(t)
+	s, err := Open(o)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope, err := s.Acquire(entry.ID)
+	defer s.Close()
+	if err = s.RestoreDesired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e := s.Current()
+	scope, err := s.Acquire(e.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer scope.Release()
+	other := "webapp-fedcba9876543210"
+	if _, err = s.Acquire(other); err == nil {
+		t.Fatal("acquired another application")
+	}
+	if _, err = s.Start(context.Background(), other, StateRequest{}); err == nil {
+		t.Fatal("started another application")
+	}
+	if err = s.Check(other, scope.Generation, scope.Policy.Revision); err == nil {
+		t.Fatal("checked another application")
+	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := s.Stop(context.Background(), entry.ID, StateRequest{ExpectedRevision: entry.Revision, ExpectedStateRevision: entry.StateRevision})
+		_, err := s.Stop(context.Background(), e.ID, StateRequest{ExpectedRevision: e.Revision, ExpectedStateRevision: e.StateRevision})
 		done <- err
 	}()
 	select {
 	case <-scope.Context.Done():
 	case <-time.After(time.Second):
-		t.Fatal("stop did not revoke leases")
+		t.Fatal("stop did not revoke generation")
 	}
-	u := uploadPackage(t, s, "2.0.0")
-	_, err = s.Install(context.Background(), InstallRequest{UploadID: u.UploadID, SHA256: u.SHA256, ExpectedRevision: entry.Revision})
-	requireCode(t, err, "webapp_update_requires_stop")
 	select {
 	case <-done:
-		t.Fatal("stop returned before lease was released")
+		t.Fatal("stop returned before lease release")
 	default:
 	}
 	scope.Release()
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if err := scope.Check(); err == nil {
-		t.Fatal("revoked scope remained valid")
-	}
-	if _, err := s.Install(context.Background(), InstallRequest{UploadID: u.UploadID, SHA256: u.SHA256, ExpectedRevision: entry.Revision}); err != nil {
-		t.Fatal(err)
+	if scope.Check() == nil {
+		t.Fatal("revoked scope remained usable")
 	}
 }
-func TestStaticShutdownPreservesDesiredStateAndRestoresFreshGeneration(t *testing.T) {
-	s, options := fixtureService(t)
-	entry := installPackage(t, s, "1.0.0", "")
-	entry, err := s.Start(context.Background(), entry.ID, StateRequest{ExpectedRevision: entry.Revision, ExpectedStateRevision: entry.StateRevision})
+func TestSingleReopenCreatesFreshGeneration(t *testing.T) {
+	o := singleFixture(t)
+	s, err := Open(o)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Close()
-	reopened, err := Open(options)
+	if err = s.RestoreDesired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e := s.Current()
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(o)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reopened.Close()
-	if err := reopened.RestoreStatic(context.Background()); err != nil {
+	defer s.Close()
+	if err = s.RestoreDesired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := reopened.Get(entry.ID)
-	if err != nil || restored.DesiredState != "running" || restored.ObservedState != "running" || restored.Generation == entry.Generation {
-		t.Fatal("static desired state was lost", restored, err)
+	if s.Current().Generation == e.Generation {
+		t.Fatal("reused generation")
 	}
 }

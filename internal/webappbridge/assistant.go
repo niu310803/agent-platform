@@ -42,8 +42,7 @@ type Adapters struct {
 	ledger    ownership
 	mu        sync.Mutex
 	runs      map[string]*assistantRun
-	active    map[string]int
-	total     int
+	active    int
 }
 type assistantEvent struct {
 	Cursor int    `json:"cursor"`
@@ -64,7 +63,7 @@ type assistantRun struct {
 }
 
 func NewAdapters(o AdapterOptions) *Adapters {
-	return &Adapters{apps: o.Apps, runtime: o.Runtime, registry: o.Registry, chats: o.Chats, artifacts: o.Artifacts, owner: o.Owner, ledger: ownership{root: o.Root}, runs: map[string]*assistantRun{}, active: map[string]int{}}
+	return &Adapters{apps: o.Apps, runtime: o.Runtime, registry: o.Registry, chats: o.Chats, artifacts: o.Artifacts, owner: o.Owner, ledger: ownership{root: o.Root}, runs: map[string]*assistantRun{}}
 }
 func (a *Adapters) Actions() map[string]Handler {
 	actions := map[string]Handler{"assistant.chat": a.chat, "assistant.events": a.events, "assistant.stop": a.stop, "assistant.execute": a.execute}
@@ -81,7 +80,7 @@ func (a *Adapters) Actions() map[string]Handler {
 	}
 	return actions
 }
-func (a *Adapters) reserve(scope *webapp.Scope) (func(), error) {
+func (a *Adapters) reserve(_ *webapp.Scope) (func(), error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for id, r := range a.runs {
@@ -91,12 +90,11 @@ func (a *Adapters) reserve(scope *webapp.Scope) (func(), error) {
 	}
 	// Include admissions that have reserved a slot but have not published their
 	// run record yet, so concurrent callers cannot overflow the record bound.
-	if a.total >= 8 || a.active[scope.InstallationID] >= 2 || len(a.runs)+a.total >= 128 {
+	if a.active >= 2 || len(a.runs)+a.active >= 128 {
 		return nil, sdkError("app_capacity_exceeded", 429)
 	}
-	a.total++
-	a.active[scope.InstallationID]++
-	return func() { a.mu.Lock(); defer a.mu.Unlock(); a.total--; a.active[scope.InstallationID]-- }, nil
+	a.active++
+	return func() { a.mu.Lock(); defer a.mu.Unlock(); a.active-- }, nil
 }
 func (a *Adapters) control(ctx context.Context) context.Context {
 	return controlscope.WithContext(ctx, controlscope.Scope{Transport: "http", Subject: a.owner})

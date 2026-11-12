@@ -25,7 +25,7 @@ func singleFixture(t *testing.T) Options {
 	if err := os.WriteFile(filepath.Join(root, "webapp.json"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	return Options{SingleRoot: root, Root: filepath.Join(root, ".state/webapps"), DataRoot: filepath.Join(root, "webapp-data"), Config: config.DefaultWebAppsConfig(), PlatformVersion: "0.5.46"}
+	return Options{SingleRoot: root, Root: filepath.Join(root, ".state/webapps"), DataRoot: filepath.Join(root, "webapp-data"), Config: config.DefaultWebAppConfig(), PlatformVersion: "0.5.46"}
 }
 
 func TestSingleFlatRootsLockVersionAndIdentity(t *testing.T) {
@@ -56,7 +56,7 @@ func TestSingleFlatRootsLockVersionAndIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.records["webapp-0123456789abcdef"].InstallationID != identity {
+	if s.record.InstallationID != identity {
 		t.Fatal("restart changed installation identity")
 	}
 	s.Close()

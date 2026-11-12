@@ -14,7 +14,7 @@ func rootOwned(info os.FileInfo) bool {
 	return ok && s.Uid == 0
 }
 
-// ProtectPlatform is called only for the explicitly enabled Compose host.
+// ProtectPlatform is called only for the explicitly enabled single-instance host.
 func ProtectPlatform() error {
 	if err := unix.Prctl(unix.PR_SET_DUMPABLE, 0, 0, 0, 0); err != nil {
 		return fmt.Errorf("protect WebApp host process: %w", err)

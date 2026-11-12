@@ -21,7 +21,7 @@ export class DesktopBridgeError extends Error {
   }
 }
 
-// Compose uses a generation-bound bootstrap credential and short-lived action
+// single-instance uses a generation-bound bootstrap credential and short-lived action
 // tokens. Desktop credentials retain their existing direct transport on macOS
 // and Windows; only the explicit cloud credential prefix selects this protocol.
 async function refreshCloudBackendToken(transport) {
@@ -89,7 +89,7 @@ function reserved(action) {
     throw new DesktopBridgeError(
       action,
       "not_supported",
-      "This capability is unavailable in Compose."
+      "This capability is unavailable in single-instance."
     );
   };
 }

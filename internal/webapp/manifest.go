@@ -374,23 +374,3 @@ func unsafeJSON(v any) bool {
 	}
 	return false
 }
-
-func validateCompose(m Manifest) error {
-	if m.Target != "any" && m.Target != "linux-x64" {
-		return fail("webapp_target_unsupported", 400)
-	}
-	if m.Backend != nil {
-		if m.Backend.Command.Type != "electron-node" {
-			return fail("webapp_launcher_unsupported", 400)
-		}
-		if e := strings.ToLower(path.Ext(m.Backend.Command.Entry)); e != ".js" && e != ".mjs" && e != ".cjs" {
-			return fail("webapp_backend_entry_invalid", 400)
-		}
-		for k := range m.Backend.Env {
-			if k == "NODE_OPTIONS" || k == "NODE_PATH" || k == "HOME" || k == "TMPDIR" || k == "PATH" || strings.HasPrefix(k, "LD_") || strings.HasPrefix(k, "DYLD_") || strings.HasPrefix(k, "AP_") {
-				return fail("webapp_backend_env_forbidden", 400)
-			}
-		}
-	}
-	return nil
-}

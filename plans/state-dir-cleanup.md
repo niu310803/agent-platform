@@ -115,16 +115,9 @@
 
 文档：`docs/连接器.md:323`、AGENTS.md 连接器锁一节。
 
-### 4. WebApp 管理目录不放 `.state`（S5，已完成）
+### 4. WebApp 管理目录（历史方案已退役）
 
-9f915bf2 已落地：
-
-- 删除 `WebAppsStateDir()` 及其路径校验。
-- `plans/webapp-node-hosting.md` §6 改为两个目录：`<RuntimeDir>/webapps/<webappId>/` 放 `app/`（当前代码，更新时原地替换，不分版本）以及 `install.json`、`desired.json`、`policy.json`、`user-config.json` 和 `logs/`；`<RuntimeDir>/webapp-data/<webappId>/` 放应用数据。更新经 `webapps/.staging/` 原子改名替换。
-- `webapps/` 不论宿主是否开启都在 `PlatformProtectedPaths` 中，Agent 普通工具不能读写策略和期望状态；应用只能读 `app/` 和指定的 user-config 文件，日志只由父进程写。
-- `docs/WebApp托管.md` 已同步。
-
-如果以后 user-config 需要保存密钥字段，再单独把这些字段放进 `.state/webapps/<webappId>/`，届时另行讨论。
+原 Compose 多应用安装、管理目录和事务方案已随宿主删除。当前 single 适配仅保存当前包的私有状态，见 [WebApp 独立实例](../docs/WebApp独立实例.md)。旧目录不自动迁移或删除，仍保持敏感目录保护。
 
 ### 5. KBX 临时配置不留空目录（S4）
 

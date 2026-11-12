@@ -82,14 +82,11 @@ func (s *Server) PrepareSingleOrigin(origin string) (string, error) {
 	if !s.deps.Config.SingleWebApp() || s.webAppGateway == nil {
 		return "", fmt.Errorf("single WebApp unavailable")
 	}
-	s.deps.Config.WebApps.PlatformOrigin = origin
+	s.deps.Config.WebApp.PlatformOrigin = origin
 	s.webAppGateway.SetPlatformOrigin(origin)
-	apps := s.deps.WebApps.List()
-	if len(apps) != 1 {
-		return "", fmt.Errorf("single WebApp requires one application")
-	}
-	if err := s.webAppGateway.Prepare(apps[0].ID); err != nil {
+	app := s.deps.WebApp.Current()
+	if err := s.webAppGateway.Prepare(app.ID); err != nil {
 		return "", err
 	}
-	return s.webAppGateway.Origin(apps[0].ID), nil
+	return s.webAppGateway.Origin(app.ID), nil
 }

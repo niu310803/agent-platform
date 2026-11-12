@@ -249,7 +249,7 @@ func parseConfigOptions(args []string) (config.LoadOptions, error) {
 	fs.StringVar(&options.Port, "port", "", "server listen port")
 	fs.StringVar(&options.SsoIdTokenFile, "sso-id-token-file", "", "absolute identity token file overriding the state directory default")
 	fs.StringVar(&options.RuntimeMode, "runtime-mode", string(config.RuntimeModeStandalone), "runtime host mode: standalone or desktop")
-	fs.StringVar(&options.WebAppHost, "webapp-host", string(config.WebAppHostDisabled), "WebApp host: disabled, compose or single")
+	fs.StringVar(&options.WebAppHost, "webapp-host", string(config.WebAppHostDisabled), "WebApp host: disabled or single")
 	fs.StringVar(&options.Listen, "listen", "", "server listen address (host:port, port 0 allowed)")
 	fs.StringVar(&options.ReadyFile, "ready-file", "", "absolute path for atomic readiness JSON")
 	fs.StringVar(&options.WebAppNode, "webapp-node", "", "absolute Node 24 launcher path")

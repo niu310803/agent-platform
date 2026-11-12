@@ -341,7 +341,7 @@ func (s *Service) capabilities(scope *webapp.Scope) any {
 		}
 		states = append(states, map[string]any{"id": id, "status": status, "declared": granted, "permission": permission})
 	}
-	return map[string]any{"bridgeVersion": 2, "host": "compose", "capabilities": states}
+	return map[string]any{"bridgeVersion": 2, "host": "single", "capabilities": states}
 }
 
 type backendKey struct{}

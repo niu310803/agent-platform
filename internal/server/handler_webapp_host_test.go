@@ -12,10 +12,10 @@ import (
 
 func webAppBoundaryServer() *Server {
 	return &Server{deps: Dependencies{Config: config.Config{
-		Server:  config.ServerConfig{Port: "8080"},
-		WebApps: config.WebAppsConfig{Enabled: true, PlatformOrigin: "https://demo.platform.example.com", ContentDomain: "apps.example.net"},
-		Auth:    config.AuthConfig{Enabled: true, AllowedSubjects: []string{"owner"}},
-	}, WebAppHost: &webapphost.Status{Host: "compose", Stage: "foundation", Issues: []webapphost.Issue{}}}}
+		Server: config.ServerConfig{Port: "8080"},
+		WebApp: config.WebAppConfig{PlatformOrigin: "https://demo.platform.example.com"},
+		Auth:   config.AuthConfig{AllowedSubjects: []string{"owner"}},
+	}, WebAppHost: &webapphost.Status{Host: "single", Stage: "foundation", Issues: []webapphost.Issue{}}}}
 }
 
 func TestWebAppHostCannotFallThroughToPlatform(t *testing.T) {
@@ -46,7 +46,7 @@ func TestWebAppOriginsCannotReachPlatformWSOrAPI(t *testing.T) {
 	s := webAppBoundaryServer()
 	for _, path := range []string{"/ws", "/api/admin/webapps/host"} {
 		r := httptest.NewRequest(http.MethodGet, "https://demo.platform.example.com"+path, nil)
-		r.Header.Set("Origin", "https://demo--0123456789abcdef.apps.example.net")
+		r.Header.Set("Origin", "http://127.0.0.1:20200")
 		w := httptest.NewRecorder()
 		if !s.handleWebAppHostBoundary(w, r) || w.Code != http.StatusForbidden {
 			t.Fatalf("cross-application origin accepted: %s", path)

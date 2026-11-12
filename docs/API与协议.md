@@ -20,21 +20,9 @@
 
 普通 Agent query 准入失败时，已存在但配置无效的 Agent 返回 `422 agent_configuration_invalid`，不存在或不可用且无 invalid 管理记录的 Agent 返回 `404 agent_not_found`，均不可重试。HTTP（包括 SSE 启动前）与 WebSocket 在 `data.error` 保留应用错误码、`status`、`retryable` 和可选 `diagnostics`，按请求/连接语言返回提示。旧 `contextConfig.agents` 和 agents 标签忽略并生成一条非阻断弃用 warning，不影响主 Agent 有效性；已有 Chat 历史仍可读取。
 
-## Linux Compose WebApp owner 管理
+## WebApp 独立实例
 
-只在合法启用 Compose WebApp 宿主后注册。所有入口要求经普通 Platform JWT verifier 验证的唯一配置 owner；应用 token 和连接器 grant 均不能代替 owner。接口保持 `{code,msg,data}`，失败在 `data.error` 返回稳定 code/status/retryable，响应 no-store，不回显服务器绝对路径或凭据。
-
-| 方法 | 路径 | 输入与结果 |
-| --- | --- | --- |
-| GET | `/api/admin/webapps/host` | 运行前提、托管阶段与待人工恢复诊断 |
-| GET | `/api/admin/webapps` | `{items:[...]}`，仅安装与期望/观察状态的安全投影 |
-| POST | `/api/admin/webapps/uploads` | 原始 `application/zip` 字节；返回 uploadId、sha256、size、createdAt |
-| POST | `/api/admin/webapps/preflight` | `{uploadId}`；返回审阅 Manifest、大小、文件数和 expectedRevision，不执行代码 |
-| POST | `/api/admin/webapps/install` | `{uploadId,sha256,expectedRevision}`；首次 expectedRevision 为空，更新必须等于当前 revision；本批次同步返回 stopped 应用 |
-| GET | `/api/admin/webapps/{id}` | 单应用安装状态；不存在返回 404 |
-| DELETE | `/api/admin/webapps/{id}` | `{expectedRevision,purgeData}`；默认保留数据，必须先 stopped |
-
-JSON 键严格区分大小写，拒绝重复键、未知字段及尾随 JSON；上传和解包限额来自 webapps 配置。管理 Cookie 写请求要求精确 platform-origin，所有非空 Origin 必须匹配配置来源；Bearer 自动化调用可省略 Origin。摘要、revision、运行中更新及数据删除条件失败不会自动重试。公开应用域、票据、SDK、启停和 operationId 属于后续批次，当前不能调用尚未注册的接口。
+Platform 的 Compose 多应用宿主、应用列表与在线安装/卸载接口已移除。Desktop 共享资源模式继续复用主 Platform，独立模式使用应用专属 Platform。保留的 single 宿主适配、owner/ticket、配置、日志与空闲状态合同见 [WebApp 独立实例](WebApp独立实例.md)。旧 `--webapp-host=compose` 与 `runtime.yml` 的 `webapps:` 节拒绝加载；普通独立 Platform 对接 agent-webclient。
 
 ## Desktop ACP 注册
 
@@ -1597,33 +1585,6 @@ Runtime 受理时冻结具体权限与来源，JSONL 顶层 `accessLevel`、Run 
 
 Automation 保持独立的场景默认：省略或 `default` 使用 `ask_for_approval`，不采用 Agent/Chat 的高权限默认。Gateway 与 Desktop WebApp execute 的固定低权限调用明确发送 `ask_for_approval`。Platform、WebClient、Desktop 和 Gateway 应同步升级，旧调用方若要明确请求审批，必须改发 `ask_for_approval`。
 
-## Linux Compose WebApp 前置诊断
-
-`GET /api/admin/webapps/host` 仅在 Linux standalone、显式 `--webapp-host=compose` 且 `runtime.yml` 的 `webapps.enabled: true` 时注册。启用还要求 JWT issuer/audience/expiry 和唯一 allowed-subjects owner；接口不接受 WebApp/连接器执行 token。未启用不注册路由；认证后 subject 非 owner 返回 403，宿主状态未装配返回 503；响应 no-store，包裹为 `{code,msg,data}`。
-
-`data` 含 host/os/arch、nodeVersion/nodeReady、supervisorReady、landlockAbi/isolationReady、isolationProfile/ipcScoped/deviceIoctlRestricted、warnings、backendPrerequisitesReady、hostingAvailable、stage 和 issues。stage 可为 foundation/installation/static/backend；staticAvailable 表示私有静态网关已组装，hostingAvailable 在受限 Node runner 已组装且前提满足时为 true。issues 另含启动时留作人工恢复的安装（`webapp_installation_invalid`、`webapp_recovery_required`），只给出代码，应用 ID 写入日志。安装与静态启停使用独立 owner 路由。
-
-启用时，Host 分类先于平台 API/CORS/WS。未知或应用内容 Host 不回落平台路由；仅 loopback peer 的精确 loopback:平台端口 GET /healthz 保留健康检查。内容域 Origin 禁止进入平台 API/主 WS，不使用 X-Forwarded-Host 推断平台身份。完整范围及限制见 [WebApp 托管](WebApp托管.md)。
-
-### WebApp 静态生命周期与访问
-
-owner 管理详情返回安装记录、Manifest、policy、用户配置及配置摘要。start/stop/restart 绑定安装与状态修订；静态 stop 撤销并等待旧 generation 租约结束。配置/授权 PUT 绑定各自 revision；运行中 Node 配置及授权变化通过重建代次生效。启动/安装状态与错误以源码 DTO 为准。
-
-`POST /api/admin/webapps/<id>/launch-ticket` 返回独立本地应用端口的 POST action、一次性 ticket 和过期时间；WebClient 用无 opener 表单打开。应用端 session 兑换、bootstrap 和配置路径归网关，不进入平台 mux。会话与票据只在内存中保存摘要；容器重启、应用停止及 owner 显式 `POST /api/admin/webapps/sessions/revoke` 后失效。Node 代理已接入；SDK transport 与连接器 action 已接入；assistant/skill/artifact 后续接入，不能据托管可用性推断所有 action 已交付。
-
-每应用使用 `http://127.0.0.1:<port>`；Compose 发布范围仅绑定宿主 loopback。独立域名/DNS/TLS/nginx 已按用户要求延期；本地模式不提供跨注册域 Cookie 隔离。详情见 [WebApp 托管](WebApp托管.md)。
-
-### WebApp 后端状态与日志
-
-生命周期与安装返回 202 operationId，读取 `/api/admin/webapps/operations/<operationId>` 观察受理结果；启动受理结果仍可为 starting，客户端继续通过管理读取观察状态；每次重启创建新 generation 并撤销旧页面/后端凭据。restart 为同应用锁下的停止再启动。健康、最近错误、退出码和重启次数只报告受控字段，不回显 PID、环境或内部地址。日志 `GET /api/admin/webapps/<id>/logs?stream=stdout|stderr&cursor=...` 只给 owner，返回有界尾部；reset 表示替换已有展示，不能将其当作永久事件日志。
-
-### Compose WebApp SDK
-
-`/__desktop/bridge.js`、bootstrap/config 和 `actions/call` 归应用会话边界，SDK action POST 要求精确应用 Origin 与 X-WebApp-CSRF，响应使用 `{ok,action,result|error}`。该 envelope 与 owner 管理的 `{code,msg,data}` 分离。
-
-Node 通过固定 loopback 的 `/webapps/session` 和 `/webapps/actions/call` 使用绑定代次的应用能力凭证；前者只接受 bootstrap 凭证，后者只接受短期 action token，均拒绝浏览器 Origin。应用凭证不被平台 JWT 或连接器 HTTP grant 接口接受。连接器调用进程内中立 scope，不生成伪造 deviceId。精确 action 与可用性由 capabilities 回应，不开放通用 Desktop Action 转发。
-
-工作会话查询复用 GET /api/chats?openedBy=<agentKey>，与 agentKey 取交集，主 WS chats 帧接受相同字段；subject 来自可信上下文，不接受调用方指定。重启清空 mail 后工作列表为空。
 
 ## 远程 MCP 调用
 

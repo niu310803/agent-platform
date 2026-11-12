@@ -137,21 +137,3 @@ type Entry struct {
 	URL           string `json:"url,omitempty"`
 	InstalledAt   int64  `json:"installedAt"`
 }
-type Upload struct {
-	UploadID  string `json:"uploadId"`
-	SHA256    string `json:"sha256"`
-	Size      int64  `json:"size"`
-	CreatedAt int64  `json:"createdAt"`
-}
-type Review struct {
-	Upload
-	Manifest         Manifest `json:"manifest"`
-	ExpectedRevision string   `json:"expectedRevision"`
-	ExpandedBytes    int64    `json:"expandedBytes"`
-	FileCount        int      `json:"fileCount"`
-}
-type InstallRequest struct {
-	UploadID         string `json:"uploadId"`
-	SHA256           string `json:"sha256"`
-	ExpectedRevision string `json:"expectedRevision"`
-}

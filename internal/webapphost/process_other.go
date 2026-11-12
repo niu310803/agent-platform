@@ -8,4 +8,4 @@ import (
 )
 
 func rootOwned(os.FileInfo) bool { return false }
-func ProtectPlatform() error     { return fmt.Errorf("WebApp hosting requires Linux Compose") }
+func ProtectPlatform() error     { return fmt.Errorf("WebApp hosting requires Linux single-instance") }

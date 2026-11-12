@@ -5,7 +5,6 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: agent-platform
-    command: ["--webapp-host=compose"]
     init: true
     restart: unless-stopped
     stop_grace_period: 45s

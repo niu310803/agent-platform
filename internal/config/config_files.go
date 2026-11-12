@@ -172,7 +172,7 @@ func (c *Config) applyMemoryValues(values map[string]any) error {
 
 func (c *Config) applyRuntimeFile(path string) error {
 	tree, err := LoadYAMLTreeWithOptions(path, YAMLTreeOptions{
-		RejectDuplicateKeys: true, PreserveQuotedScalarPrefixes: []string{"webapps"},
+		RejectDuplicateKeys: true, PreserveQuotedScalarPrefixes: []string{"webapp"},
 	})
 	if err != nil {
 		return err
@@ -187,8 +187,11 @@ func (c *Config) applyRuntimeFile(path string) error {
 	if _, exists := values["primary-chat"]; exists {
 		return fmt.Errorf("%s: primary-chat was removed; configure mode BOT and agent-settings.bot.dispatch", path)
 	}
-	if value, exists := values["webapps"]; exists {
-		if err := c.applyWebApps(value); err != nil {
+	if _, exists := values["webapps"]; exists {
+		return fmt.Errorf("runtime.webapps was removed; Platform no longer hosts multiple WebApps")
+	}
+	if value, exists := values["webapp"]; exists {
+		if err := c.applyWebApp(value); err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 	}

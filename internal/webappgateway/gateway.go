@@ -28,10 +28,11 @@ type Gateway struct {
 	OnRequest             func() func()
 	PlatformAuthorization func(string) bool
 	service               *webapp.Service
-	config                config.WebAppsConfig
+	config                config.WebAppConfig
 	auth                  *authorization
 	mu                    sync.Mutex
-	listeners             map[string]*localListener
+	listener              *localListener
+	appID                 string
 	closed                bool
 }
 type Launch struct {
@@ -40,8 +41,8 @@ type Launch struct {
 	ExpiresAt int64  `json:"expiresAt"`
 }
 
-func New(service *webapp.Service, cfg config.WebAppsConfig) *Gateway {
-	return &Gateway{service: service, config: cfg, auth: newAuthorization(), listeners: map[string]*localListener{}}
+func New(service *webapp.Service, cfg config.WebAppConfig) *Gateway {
+	return &Gateway{service: service, config: cfg, auth: newAuthorization(), appID: service.Current().ID}
 }
 
 func (g *Gateway) SetPlatformOrigin(origin string) { g.config.PlatformOrigin = origin }
@@ -51,17 +52,15 @@ func (g *Gateway) Prepare(id string) error         { return g.ensureListener(id)
 func (g *Gateway) HostID(host string) string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	for id, l := range g.listeners {
-		if host == l.host {
-			return id
-		}
+	if g.listener != nil && host == g.listener.host {
+		return g.appID
 	}
 	return ""
 }
 func (g *Gateway) Origin(id string) string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if l := g.listeners[id]; l != nil {
+	if l := g.listener; id == g.appID && l != nil {
 		return "http://" + l.host
 	}
 	return ""
@@ -166,7 +165,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !authenticated {
 		if r.Method == "GET" && strings.Contains(r.Header.Get("Accept"), "text/html") && !strings.HasPrefix(r.URL.Path, "/__desktop") {
-			http.Redirect(w, r, g.config.PlatformOrigin+"/webapps?open="+url.QueryEscape(id), http.StatusSeeOther)
+			writeError(w, &webapp.Error{Code: "webapp_session_required", Status: 401})
 			return
 		}
 		writeError(w, &webapp.Error{Code: "webapp_session_required", Status: 401})

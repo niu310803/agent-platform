@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Derive the Compose transport from the authoritative Desktop SDK contract."""
+"""Derive the single-instance transport from the authoritative Desktop SDK contract."""
 import argparse,hashlib,pathlib
 p=argparse.ArgumentParser();p.add_argument('--desktop-root',required=True);p.add_argument('--check',action='store_true');a=p.parse_args()
 source=(pathlib.Path(a.desktop_root)/'contracts/webapp/bridge.mjs').read_text()
-value=source
+value=source.replace("Compose", "single-instance")
 # Page requests use host-only sessions and the authenticated bootstrap CSRF.
 helper='''async function cloudPageHeaders() {
   const response = await fetch("/__desktop/bootstrap.json", { credentials: "same-origin", cache: "no-store", redirect: "error" });
@@ -29,10 +29,10 @@ value=value[:start]+'''export const auth = Object.freeze({ isAvailable: () => fa
 # Native image inputs cannot use the hosted bridge. Report the unsupported
 # capability before attempting any upload or local Desktop action.
 value=value.replace('Object.freeze(image), executeAssistant','Object.freeze(Object.assign(reserved("assistant.image"), { cancel: reserved("assistant.image.cancel") })), executeAssistant')
-value=value.replace('"not_implemented",\n      "This capability is reserved but not implemented in the current Desktop version."', '"not_supported",\n      "This capability is unavailable in Compose."')
+value=value.replace('"not_implemented",\n      "This capability is reserved but not implemented in the current Desktop version."', '"not_supported",\n      "This capability is unavailable in single-instance."')
 value='// Generated from Desktop SDK SHA256: '+hashlib.sha256(source.encode()).hexdigest()+'\n'+value
 output=pathlib.Path(__file__).resolve().parents[1]/'internal/webappbridge/sdk/bridge.mjs'
 if a.check:
- if not output.exists() or output.read_text()!=value:raise SystemExit('Compose WebApp SDK is stale')
+ if not output.exists() or output.read_text()!=value:raise SystemExit('single-instance WebApp SDK is stale')
 else:output.write_text(value)
-print('Compose WebApp SDK is synchronized')
+print('single-instance WebApp SDK is synchronized')

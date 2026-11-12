@@ -10,7 +10,7 @@
 
 本文保留开发入口、模块边界和必须遵守的约束；功能与接口细节以文末专题索引为入口。未实现或未经目标环境验证的能力不得写成已交付。
 
-WebApp 多应用托管仅在 Linux Compose 双重选择下启用；独立应用使用 standalone + `--webapp-host=single`，支持 Mac/Windows 的宿主 Node 24 与 Linux supervisor/Landlock，裁剪调度、Mailbox、终端等模块，包内资源与共享 registries 只读。RuntimeMode 保持 standalone/desktop；single 的凭证、ticket、ready 和 idle 合同见 [WebApp 独立实例](docs/WebApp独立实例.md)。`internal/webapp` 拥有安装事务、授权和生命周期；`webappgateway` 拥有本地端口、会话和代理；`webapphost` 与 `cmd/webapp-supervisor` 负责受限 Node 及后代清理；`webappbridge` 适配既有 Runtime/Catalog/ChatResource/connectorops，不伪造 Desktop 设备或 owner JWT。最低 Landlock ABI4，ABI6 增强项按实际诊断报告；不可用不降级执行。本地 origin 及故障恢复已在原生候选验证，生产未切换；独立域名延期。见 [WebApp 托管](docs/WebApp托管.md)。
+Desktop 管理多个 WebApp：共享资源模式沿用 Desktop 主 Platform，独立模式使用应用专属 Platform 与环境。Platform 的 Compose 多应用安装与托管已移除，普通 standalone 仅提供智能体服务并对接 agent-webclient。现有 `--webapp-host=single` 只读取宿主已经安装的一个包，不扫描或安装应用；其适配合同见 [WebApp 独立实例](docs/WebApp独立实例.md)。`internal/webapp` 保存单实例授权和生命周期，安装、升级、卸载由外部宿主负责；`webappgateway`、`webapphost` 和 `webappbridge` 保留单实例网关、受限 Node 及 Runtime/Catalog/ChatResource/connectorops 适配。旧 `--webapp-host=compose` 与 `runtime.yml` 的 `webapps` 节硬失败；独立实例后续装配必须遵循应用资源、凭据与运行数据完全独立的边界，不得复用 Desktop 的共享 registry 或连接器授权。
 
 Memory 由 Platform worker 调用 memx 维护分层 Agent daily/summary 与总体 summary（agents→summarize→consolidate），预算使用 memory.summary.global/agent；旧 worker.summary-max-chars 拒绝，分层管理 API 尚未完成；上下文由 contextConfig.tags 的 memory-global/memory-agent 独立选择，memoryConfig.enabled 仅控制采集，支持定时增量与手工日期范围任务（独立进度、配置模型）；知识库通过受管 KBX CLI 读取和维护，Platform 管理目录监听、库级自动维护与重启对账。当前范围见 [记忆系统](docs/记忆系统.md) 与 [KBX 接入](docs/KBX接入.md)。
 
@@ -260,4 +260,4 @@ Agent 默认档位声明为 `accessConfig.default`（ask_for_approval/auto_appro
 
 请求权限 `default`（或省略）是后台默认选择器，不再是请求审批档位；具体权限统一为 ask_for_approval/auto_approve/full_access。普通 Query、execute、side query 与子执行器按目标 Agent 配置解析，未配置回退 ask_for_approval；Automation 的场景默认保持 ask_for_approval。Run、顶层 JSONL 决策与权限事件只使用具体值，原始 query 保留调用方 default/省略。旧历史 default 冻结决定及旧 Agent/策略配置按原请求审批语义读取，不能重算为当前 Agent 高默认。Composer 只有三个具体档位，未明确选择时发送 default 并显示后台解析档位，运行观察不变成显式选择。
 
-远程 HTTP MCP 的受信 WebApp 调用由 `internal/remotemcp` 独立承接，HTTP `/api/mcp/invoke` 与 Compose `mcp.invoke` 共用核心；不改变 connectorops 拒绝 OneID 的边界。身份仅消费既有 SSO ID token 文件，见 [远程 MCP 调用](docs/远程MCP调用.md)。
+远程 HTTP MCP 的受信 WebApp 调用由 `internal/remotemcp` 独立承接，HTTP `/api/mcp/invoke` 与独立实例 `mcp.invoke` 共用核心；不改变 connectorops 拒绝 OneID 的边界。身份仅消费既有 SSO ID token 文件，见 [远程 MCP 调用](docs/远程MCP调用.md)。

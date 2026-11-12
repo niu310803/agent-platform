@@ -6,20 +6,6 @@ import (
 	"testing"
 )
 
-func TestMissingHostingPreservesExistingComposeRecords(t *testing.T) {
-	raw := []byte(`{"schemaVersion":2,"id":"webapp-0123456789abcdef","key":"compose","label":"Compose","version":"1.0.0","target":"any","frontend":{"root":"frontend","index":"index.html"}}`)
-	manifest, err := ParseManifest(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if manifest.Hosting != "" {
-		t.Fatal("default hosting must not change old installation record serialization")
-	}
-	if err := validateCompose(manifest); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestSharedManifestFixtures(t *testing.T) {
 	raw, err := os.ReadFile("testdata/manifest-v2.json")
 	if err != nil {
